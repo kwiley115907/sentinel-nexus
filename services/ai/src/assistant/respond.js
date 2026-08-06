@@ -1,4 +1,3 @@
-
 const {
   searchWeb,
 } = require("./web-search");
@@ -61,6 +60,19 @@ function isCapabilityRequest(prompt) {
 function isKnowledgeStatusRequest(prompt) {
   return /\b(knowledge status|knowledge base status|what do you know)\b/i.test(
     prompt,
+  );
+}
+
+function isGreeting(prompt) {
+  const trimmed = prompt.trim();
+
+  return (
+    /^(hi|hello|hey|hiya|yo|howdy|greetings|sup)(\s+there)?[\s!.,?]*$/i.test(
+      trimmed,
+    ) ||
+    /^good (morning|afternoon|evening)[\s!.,?]*$/i.test(
+      trimmed,
+    )
   );
 }
 
@@ -172,6 +184,18 @@ async function answerFireAlarmQuestion({
 
   const project = readProject(projectId);
 
+  if (isGreeting(normalizedPrompt)) {
+    return {
+      success: true,
+      type: "chat",
+      reply: [
+        `Hello. I'm ${ASSISTANT_CONFIG.name}, your ${ASSISTANT_CONFIG.role}.`,
+        `Ask me a fire alarm or low-voltage design question, or say "what can you do" for an overview of my capabilities.`,
+      ].join("\n"),
+      projectId: project.projectId,
+    };
+  }
+
   const explicitWebQuery =
     extractWebSearchQuery(normalizedPrompt);
 
@@ -195,6 +219,7 @@ async function answerFireAlarmQuestion({
       projectId: project.projectId,
     };
   }
+
   const blueprintSummary =
     compactBlueprintSummary(blueprint);
 
