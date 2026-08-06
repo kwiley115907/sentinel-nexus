@@ -1,0 +1,20 @@
+{
+  "projectId": "VDS-2026",
+  "name": "",
+  "building": "",
+  "address": "",
+  "systemManufacturer": "",
+  "panelModel": "",
+  "drawingRevision": "",
+  "notes": [
+    {
+      "id": "note-1784945159400",
+      "text": "Building A uses RPS-2 for the second-floor east-corridor notification circuit.",
+      "createdAt": "2026-07-25T02:05:59.400Z"
+    }
+  ],
+  "wireRuns": [],
+  "devices": [],
+  "inspections": [],
+  "updatedAt": "2026-07-25T02:05:59.400Z"
+}

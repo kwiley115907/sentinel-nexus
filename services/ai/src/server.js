@@ -1,4 +1,17 @@
+require("dotenv").config();
+
+console.log("Sentinel environment:", {
+  cwd: process.cwd(),
+  webSearchEnabled: process.env.WEB_SEARCH_ENABLED,
+  tavilyKeyConfigured: Boolean(process.env.TAVILY_API_KEY),
+});
+
+
 const express = require("express");
+const {
+  answerFireAlarmQuestion,
+} = require("./assistant/respond");
+
 const cors = require("cors");
 const { z } = require("zod");
 
@@ -141,24 +154,105 @@ function build(prompt = "") {
 
 app.get("/", (_req, res) => res.json({ status: "online" }));
 
-app.post("/gateway", (req, res) => {
+app.post("/gateway", async (req, res) => {
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Invalid request." });
 
-  const { requestType, prompt, blueprint } = parsed.data;
+  if (!parsed.success) {
+    return res.status(400).json({
+      success: false,
+      error: "Invalid request.",
+      details: parsed.error.flatten(),
+    });
+  }
 
-  if (requestType === "device-placement") {
-    const rooms = blueprint?.rooms || [];
+  const {
+    requestType = "chat",
+    prompt = "",
+    blueprint,
+  } = parsed.data;
+
+  const normalizedRequestType = String(requestType)
+    .trim()
+    .toLowerCase();
+
+  const normalizedPrompt = String(prompt).trim();
+
+  if (normalizedRequestType === "device-placement") {
+    const rooms = Array.isArray(blueprint?.rooms)
+      ? blueprint.rooms
+      : [];
+
     return res.json({
+      success: true,
       type: "device-placement",
-      devices: rooms.flatMap((r, i) => [
-        device(`sd-${i + 1}`, "SMOKE", "SD", r.x + r.width / 2, r.y + r.depth / 2),
-        device(`hs-${i + 1}`, "HORN_STROBE", "HS", r.x + 2, r.y + 2),
+      devices: rooms.flatMap((room, index) => [
+        device(
+          `sd-${index + 1}`,
+          "SMOKE",
+          "SD",
+          room.x + room.width / 2,
+          room.y + room.depth / 2,
+        ),
+        device(
+          `hs-${index + 1}`,
+          "HORN_STROBE",
+          "HS",
+          room.x + 2,
+          room.y + 2,
+        ),
       ]),
     });
   }
 
-  return res.json(build(prompt));
+  if (
+    normalizedRequestType === "chat" ||
+    normalizedRequestType === "assistant" ||
+    normalizedRequestType === "sentinel-chat"
+  ) {
+    const assistantResponse =
+      await answerFireAlarmQuestion({
+        prompt: normalizedPrompt,
+        projectId:
+          typeof req.body?.projectId === "string"
+            ? req.body.projectId
+            : "default",
+        blueprint: req.body?.blueprint,
+      });
+
+    const status =
+      assistantResponse.success === false
+        ? 400
+        : 200;
+
+    return res
+      .status(status)
+      .json(assistantResponse);
+  }
+
+  if (
+    normalizedRequestType === "building" ||
+    normalizedRequestType === "blueprint" ||
+    normalizedRequestType === "generate-building" ||
+    normalizedRequestType === "blueprint-generator"
+  ) {
+    return res.json({
+      success: true,
+      ...build(normalizedPrompt),
+    });
+  }
+
+  return res.status(400).json({
+    success: false,
+    error: `Unsupported requestType: ${normalizedRequestType}`,
+    supportedRequestTypes: [
+      "chat",
+      "assistant",
+      "device-placement",
+      "building",
+      "blueprint",
+      "generate-building",
+    ],
+  });
 });
 
 app.post("/generate-building", (req, res) => {
