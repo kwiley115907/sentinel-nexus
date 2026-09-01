@@ -60,7 +60,7 @@ export default function CadScene({
     Number.isFinite(rawExteriorFootprint.minZ) &&
     Number.isFinite(rawExteriorFootprint.maxZ) &&
     Number.isFinite(rawExteriorFootprint.height)
-      ? { ...rawExteriorFootprint, showRoof, hideWalls: true }
+      ? { ...rawExteriorFootprint, showRoof }
       : null;
   const gridSize = Math.max(
     40,

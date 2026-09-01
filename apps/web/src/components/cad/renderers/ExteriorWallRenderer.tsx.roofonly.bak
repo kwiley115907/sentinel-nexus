@@ -118,14 +118,10 @@ export default function ExteriorWallRenderer({
         <meshStandardMaterial color="#3f4451" roughness={0.95} />
       </mesh>
 
-      {!footprint.hideWalls && (
-        <>
-          <ShellWall x={centerX} z={footprint.minZ} width={width} depth={wallThickness} height={totalHeight} label="North Exterior" selected={selected} />
-          <ShellWall x={centerX} z={footprint.maxZ} width={width} depth={wallThickness} height={totalHeight} label="South Exterior" selected={selected} />
-          <ShellWall x={footprint.minX} z={centerZ} width={wallThickness} depth={depth} height={totalHeight} label="West Exterior" selected={selected} />
-          <ShellWall x={footprint.maxX} z={centerZ} width={wallThickness} depth={depth} height={totalHeight} label="East Exterior" selected={selected} />
-        </>
-      )}
+      <ShellWall x={centerX} z={footprint.minZ} width={width} depth={wallThickness} height={totalHeight} label="North Exterior" selected={selected} />
+      <ShellWall x={centerX} z={footprint.maxZ} width={width} depth={wallThickness} height={totalHeight} label="South Exterior" selected={selected} />
+      <ShellWall x={footprint.minX} z={centerZ} width={wallThickness} depth={depth} height={totalHeight} label="West Exterior" selected={selected} />
+      <ShellWall x={footprint.maxX} z={centerZ} width={wallThickness} depth={depth} height={totalHeight} label="East Exterior" selected={selected} />
 
       {Array.from({ length: Math.max(0, footprint.stories - 1) }).map((_, floor) => (
         <mesh key={floor} position={[centerX, footprint.height * (floor + 1), centerZ]}>

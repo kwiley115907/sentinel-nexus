@@ -60,7 +60,7 @@ export default function CadScene({
     Number.isFinite(rawExteriorFootprint.minZ) &&
     Number.isFinite(rawExteriorFootprint.maxZ) &&
     Number.isFinite(rawExteriorFootprint.height)
-      ? { ...rawExteriorFootprint, showRoof, hideWalls: true }
+      ? { ...rawExteriorFootprint, showRoof }
       : null;
   const gridSize = Math.max(
     40,
@@ -91,10 +91,6 @@ export default function CadScene({
         }}
         onStop={() => setDraggingId("")}
       />
-
-      {visibleLayers.ARCHITECTURE && exteriorFootprint && (
-        <ExteriorWallRenderer footprint={exteriorFootprint} selected={false} />
-      )}
 
       {walls.filter((wall: any) => visibleLayers[wall.layer]).map((wall: any) => (
         <InteriorWallRenderer key={wall.id} wall={wall} selected={selectedId === wall.id} onSelect={() => setSelectedId(wall.id)} />
