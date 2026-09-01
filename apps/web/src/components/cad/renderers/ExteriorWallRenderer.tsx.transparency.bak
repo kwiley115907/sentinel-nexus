@@ -42,7 +42,7 @@ function ShellWall({
     <group>
       <mesh position={[x, height / 2, z]}>
         <boxGeometry args={[width, height, depth]} />
-        <meshStandardMaterial color="#cdba97" roughness={0.85} metalness={0.02} transparent opacity={0.88} />
+        <meshStandardMaterial color="#cdba97" roughness={0.85} metalness={0.02} />
       </mesh>
 
       <lineSegments position={[x, height / 2, z]}>
