@@ -1,0 +1,1664 @@
+"use client";
+
+import AppShell from "@/components/AppShell";
+import CadRibbon, { CadCommand } from "@/components/cad/CadRibbon";
+import SentinelAiPanel from "@/components/ai/SentinelAiPanel";
+import Cad3DUpgradePanel, { UpgradeAction } from "@/components/cad/Cad3DUpgradePanel";
+import DeviceDragPalette from "@/components/cad/DeviceDragPalette";
+import ObjectTree from "@/components/cad/ObjectTree";
+import { exportCanvasPdf, parseImportedPlan } from "@/lib/cadImportExport";
+import { supabase } from "@/lib/supabase";
+import { OrbitControls, Text } from "@react-three/drei";
+import { Canvas, ThreeEvent } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
+import CadDimensionLine from "@/components/cad/CadDimensionLine";
+import RoomRenderer from "@/components/cad/renderers/RoomRenderer";
+import ExteriorWallRenderer, { getExteriorFootprintFromRooms } from "@/components/cad/renderers/ExteriorWallRenderer";
+import InteriorWallRenderer, { generateInteriorWallsFromRooms } from "@/components/cad/renderers/InteriorWallRenderer";
+import DoorRenderer from "@/components/cad/renderers/DoorRenderer";
+import WindowRenderer from "@/components/cad/renderers/WindowRenderer";
+import StairRenderer from "@/components/cad/renderers/StairRenderer";
+import DeviceRenderer from "@/components/cad/renderers/DeviceRenderer";
+import DimensionRenderer, { generateRoomDimensions } from "@/components/cad/renderers/DimensionRenderer";
+import { convertAiBlueprintToCad } from "@/components/cad/importers/AiImporter";
+import CadScene from "@/components/cad/renderers/CadScene";
+import CadLegend from "@/components/cad/renderers/CadLegend";
+
+import {
+  feetToInches,
+  formatFeet,
+  formatFeetInches,
+  parseFeetInches,
+} from "@/lib/measurements";
+
+type Layer = "ARCHITECTURE" | "FIRE_ALARM" | "CCTV" | "SECURITY" | "ACCESS";
+type Vec2 = { x: number; z: number };
+type Wall = { id: string; start: Vec2; end: Vec2; height: number; layer: Layer };
+type BuildingShape = "RECTANGLE" | "L_SHAPE" | "U_SHAPE" | "T_SHAPE" | "Y_SHAPE" | "DOUBLE_STACK" | "TRIPLE_STACK" | "TOWER";
+
+type Room = {
+  id: string;
+  label: string;
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  height: number;
+  stories: number;
+  shape: BuildingShape;
+  layer: Layer;
+  floor?: number;
+  kind?: "SHELL" | "ROOM";
+};
+type Door = { id: string; x: number; z: number; layer: Layer; width?: number; label?: string; floor?: number; side?: "NORTH" | "SOUTH" | "EAST" | "WEST" };
+type WindowItem = { id: string; x: number; z: number; layer: Layer; width?: number; label?: string; floor?: number; side?: "NORTH" | "SOUTH" | "EAST" | "WEST"; y?: number };
+type Device = { id: string; label: string; x: number; z: number; layer: Layer; floor?: number; y?: number };
+type Wire = { id: string; fromId: string; toId: string; layer: Layer };
+
+type BuildingBlock = {
+  x: number;
+  z: number;
+  width: number;
+  depth: number;
+  rotation?: number;
+};
+
+type Saved3DModel = {
+  id: string;
+  name: string;
+  model_data: {
+    rooms?: Room[];
+    walls?: Wall[];
+    doors?: Door[];
+    windows?: WindowItem[];
+    devices?: Device[];
+    wires?: Wire[];
+  };
+};
+
+const layers: Record<Layer, string> = {
+  ARCHITECTURE: "Architecture",
+  FIRE_ALARM: "Fire Alarm",
+  CCTV: "CCTV",
+  SECURITY: "Security",
+  ACCESS: "Access Control",
+};
+
+const devicePalette = [
+  { label: "SD", name: "Smoke Detector", layer: "FIRE_ALARM" as Layer },
+  { label: "HD", name: "Heat Detector", layer: "FIRE_ALARM" as Layer },
+  { label: "PS", name: "Pull Station", layer: "FIRE_ALARM" as Layer },
+  { label: "HS", name: "Horn Strobe", layer: "FIRE_ALARM" as Layer },
+  { label: "CAM", name: "Camera", layer: "CCTV" as Layer },
+  { label: "DC", name: "Door Contact", layer: "SECURITY" as Layer },
+  { label: "CR", name: "Card Reader", layer: "ACCESS" as Layer },
+  { label: "REX", name: "Request To Exit", layer: "ACCESS" as Layer },
+];
+
+function makeId() {
+  return crypto.randomUUID?.() || Math.random().toString(36).slice(2);
+}
+
+function snap(value: number) {
+  return Math.round(value * 2) / 2;
+}
+
+function pointFromEvent(event: ThreeEvent<PointerEvent>): Vec2 {
+  return { x: snap(event.point.x), z: snap(event.point.z) };
+}
+
+
+function StairModel({ stair }: { stair: any }) {
+  const x = Number(stair.x ?? 0);
+  const z = Number(stair.z ?? stair.y ?? 0);
+  const width = Math.max(1.8, Number(stair.width ?? 2.4));
+  const depth = Math.max(2.4, Number(stair.depth ?? stair.height ?? 3.4));
+  const stories = Math.max(1, Number(stair.stories ?? 1));
+  const totalHeight = stories * 3;
+  const treadCount = Math.max(7, stories * 7);
+
+  return (
+    <group position={[x, 0.08, z]}>
+      <mesh position={[0, totalHeight / 2, 0]}>
+        <boxGeometry args={[width, totalHeight, depth]} />
+        <meshStandardMaterial color="#111827" transparent opacity={0.22} />
+      </mesh>
+
+      <lineSegments position={[0, totalHeight / 2, 0]}>
+        <edgesGeometry args={[new THREE.BoxGeometry(width, totalHeight, depth)]} />
+        <lineBasicMaterial color="#facc15" />
+      </lineSegments>
+
+      {Array.from({ length: treadCount }).map((_, index) => (
+        <mesh key={index} position={[0, 0.18 + index * (totalHeight / treadCount), -depth / 2 + index * (depth / treadCount)]}>
+          <boxGeometry args={[width, 0.08, depth / 10]} />
+          <meshBasicMaterial color="#facc15" />
+        </mesh>
+      ))}
+
+      <Text position={[0, totalHeight + 0.35, 0]} fontSize={0.28} color="#facc15">
+        {stair.label || "Stair Core"}
+      </Text>
+    </group>
+  );
+}
+
+export default function Blueprint3DPage() {
+  const controlsRef = useRef<any>(null);
+  const [command, setCommand] = useState<CadCommand>("SELECT");
+  const [activeLayer, setActiveLayer] = useState<Layer>("ARCHITECTURE");
+  const [selectedId, setSelectedId] = useState("");
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
+  const [selectedDimension, setSelectedDimension] = useState<"width" | "depth" | "height" | null>(null);
+  const [dimensionInput, setDimensionInput] = useState("");
+  const [selectedResizeSide, setSelectedResizeSide] = useState<"east" | "west" | "north" | "south" | null>(null);
+  const [resizeDrag, setResizeDrag] = useState<{
+    roomId: string;
+    side: "east" | "west" | "north" | "south";
+  } | null>(null);
+  const [status, setStatus] = useState("Command: SELECT");
+  const [wallStart, setWallStart] = useState<Vec2 | null>(null);
+  const [wireStartId, setWireStartId] = useState("");
+  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [currentFloor, setCurrentFloor] = useState(1);
+  const [gizmoMode, setGizmoMode] = useState<"MOVE" | "ROTATE" | "RESIZE">("MOVE");
+  const [measureMode, setMeasureMode] = useState(false);
+  const [walkMode, setWalkMode] = useState(false);
+  const [pendingDeviceLabel, setPendingDeviceLabel] = useState("");
+  const [measureStart, setMeasureStart] = useState<Vec2 | null>(null);
+  const [measureEnd, setMeasureEnd] = useState<Vec2 | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [draggingId, setDraggingId] = useState("");
+  const [savedModels, setSavedModels] = useState<Saved3DModel[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [modelName, setModelName] = useState("Sentinel Nexus 3D Model");
+
+  const [visibleLayers, setVisibleLayers] = useState<Record<Layer, boolean>>({
+    ARCHITECTURE: true,
+    FIRE_ALARM: true,
+    CCTV: true,
+    SECURITY: true,
+    ACCESS: true,
+  });
+
+  const [rooms, setRooms] = useState<Room[]>([
+    { id: "office", label: "Office", x: 0, z: 0, width: 8, depth: 5, height: 2.8, stories: 1, shape: "RECTANGLE", layer: "ARCHITECTURE" },
+  ]);
+  const [walls, setWalls] = useState<Wall[]>([]);
+  const [doors, setDoors] = useState<Door[]>([]);
+  const [windows, setWindows] = useState<WindowItem[]>([]);
+  const [stairs, setStairs] = useState<any[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [wires, setWires] = useState<Wire[]>([]);
+
+
+  useEffect(() => {
+    function handleCadKeyboard(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        deselectAll();
+      }
+
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (!selectedId) return;
+
+        setRooms((items) => items.filter((item) => item.id !== selectedId));
+        setWalls((items) => items.filter((item) => item.id !== selectedId));
+        setDoors((items) => items.filter((item) => item.id !== selectedId));
+        setWindows((items) => items.filter((item) => item.id !== selectedId));
+        setStairs((items) => items.filter((item) => item.id !== selectedId));
+        setDevices((items) => items.filter((item) => item.id !== selectedId));
+        setWires((items) =>
+          items.filter((item) => item.fromId !== selectedId && item.toId !== selectedId),
+        );
+
+        deselectAll();
+        setStatus("Selected CAD object deleted.");
+      }
+    }
+
+    window.addEventListener("keydown", handleCadKeyboard);
+    return () => window.removeEventListener("keydown", handleCadKeyboard);
+  }, [selectedId]);
+
+  const selectedRoom = rooms.find((room) => room.id === selectedId);
+  const selectedWall = walls.find((wall) => wall.id === selectedId);
+  const selectedDevice = devices.find((device) => device.id === selectedId);
+
+  const measurementFeet =
+    measureStart && measureEnd
+      ? Math.sqrt(
+          (measureEnd.x - measureStart.x) ** 2 +
+            (measureEnd.z - measureStart.z) ** 2,
+        )
+      : 0;
+
+  const materialCount = useMemo(() => {
+    return devices.reduce<Record<string, number>>((count, device) => {
+      count[device.label] = (count[device.label] || 0) + 1;
+      return count;
+    }, {});
+  }, [devices]);
+
+  async function loadSavedModels() {
+    const { data, error } = await supabase
+      .from("blueprint_3d_models")
+      .select("id,name,model_data")
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setSavedModels(data || []);
+    if (!selectedModelId && data?.[0]) {
+      setSelectedModelId(data[0].id);
+    }
+  }
+
+  async function save3DModel() {
+    const { error } = await supabase.from("blueprint_3d_models").insert({
+      name: modelName || "Sentinel Nexus 3D Model",
+      model_data: {
+        rooms,
+        walls,
+        doors,
+        windows,
+        devices,
+        wires,
+      },
+    });
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setStatus("3D model saved.");
+    await loadSavedModels();
+  }
+
+  async function loadSelected3DModel() {
+    const model = savedModels.find((item) => item.id === selectedModelId);
+
+    if (!model) {
+      setStatus("Select a saved 3D model first.");
+      return;
+    }
+
+    setRooms(model.model_data?.rooms || []);
+    setWalls(model.model_data?.walls || []);
+    setDoors(model.model_data?.doors || []);
+    setWindows(model.model_data?.windows || []);
+    setDevices(model.model_data?.devices || []);
+    setWires(model.model_data?.wires || []);
+    setModelName(model.name);
+    setStatus(`Loaded ${model.name}`);
+  }
+
+  async function renameSelected3DModel() {
+    if (!selectedModelId) {
+      setStatus("Select a saved 3D model first.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("blueprint_3d_models")
+      .update({ name: modelName || "Untitled 3D Model" })
+      .eq("id", selectedModelId);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setStatus("3D model renamed.");
+    await loadSavedModels();
+  }
+
+  async function deleteSelected3DModel() {
+    if (!selectedModelId) {
+      setStatus("Select a saved 3D model first.");
+      return;
+    }
+
+    const confirmed = confirm("Delete this saved 3D model?");
+    if (!confirmed) return;
+
+    const { error } = await supabase
+      .from("blueprint_3d_models")
+      .delete()
+      .eq("id", selectedModelId);
+
+    if (error) {
+      setStatus(error.message);
+      return;
+    }
+
+    setSelectedModelId("");
+    setStatus("3D model deleted.");
+    await loadSavedModels();
+  }
+
+  useEffect(() => {
+    loadSavedModels();
+  }, []);
+
+  function deselectAll() {
+    setSelectedId("");
+    setSelectedBlockIndex(null);
+    setDraggingId("");
+    setWireStartId("");
+    setStatus("Deselected.");
+  }
+
+  function setCamera(position: [number, number, number]) {
+    const controls = controlsRef.current;
+    if (!controls) return;
+    controls.object.position.set(...position);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }
+
+  async function generateBuildingWithAi() {
+    const prompt = aiPrompt.trim();
+
+    if (prompt.length < 5) {
+      setStatus("Type a building prompt first.");
+      alert("Type a building prompt first.");
+      return;
+    }
+
+    try {
+      setStatus("AI is generating building...");
+
+      const response = await fetch("/api/ai/building-generator", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ prompt }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setStatus(data.error || "AI building generation failed.");
+        alert(data.error || "AI building generation failed.");
+        return;
+      }
+
+      setRooms(data.rooms || []);
+      setSelectedId("");
+      setSelectedBlockIndex(null);
+      setStatus(`AI generated ${data.rooms?.length || 0} building section(s).`);
+    } catch (error) {
+      setStatus("AI request failed. Check API key or server logs.");
+      alert("AI request failed. Check API key or server logs.");
+    }
+  }
+
+  async function handleImportFile(file: File) {
+    try {
+      const result = await parseImportedPlan(file);
+      console.log(result);
+      setStatus(`Imported ${file.name}`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Import failed.");
+    }
+  }
+
+  async function handleUpgradeAction(action: UpgradeAction) {
+    if (action === "MOVE_GIZMO") {
+      setGizmoMode("MOVE");
+      setStatus("Move gizmo active.");
+    }
+
+    if (action === "ROTATE_GIZMO") {
+      setGizmoMode("ROTATE");
+      setStatus("Rotate gizmo active.");
+    }
+
+    if (action === "RESIZE_GIZMO") {
+      setGizmoMode("RESIZE");
+      setStatus("Resize gizmo active.");
+    }
+
+    if (action === "SNAP_TOGGLE") {
+      setSnapEnabled((current) => !current);
+      setStatus("Snap toggled.");
+    }
+
+    if (action === "FLOOR_UP") {
+      setCurrentFloor((floor) => floor + 1);
+      setStatus("Floor changed.");
+    }
+
+    if (action === "FLOOR_DOWN") {
+      setCurrentFloor((floor) => Math.max(1, floor - 1));
+      setStatus("Floor changed.");
+    }
+
+    if (action === "MEASURE") {
+      setMeasureMode((current) => !current);
+      setMeasureStart(null);
+      setMeasureEnd(null);
+      setStatus("Measurement mode toggled.");
+    }
+
+    if (action === "FIRST_PERSON") {
+      setWalkMode((current) => !current);
+      setStatus("Walkthrough mode toggled.");
+    }
+
+    if (action === "IMPORT_PLAN") {
+      document.getElementById("plan-import-input")?.click();
+    }
+  }
+
+  function handleCommand(nextCommand: CadCommand) {
+    setCommand(nextCommand);
+    setStatus(`Command: ${nextCommand}`);
+    setWallStart(null);
+    setWireStartId("");
+
+    if (nextCommand === "TOP_VIEW") setCamera([0, 16, 0.01]);
+    if (nextCommand === "FRONT_VIEW") setCamera([0, 5, 14]);
+    if (nextCommand === "SIDE_VIEW") setCamera([14, 5, 0]);
+    if (nextCommand === "RESET_VIEW") setCamera([9, 8, 9]);
+
+    if (nextCommand === "DELETE") {
+      setRooms([]);
+      setWalls([]);
+      setDoors([]);
+      setWindows([]);
+      setDevices([]);
+      setWires([]);
+      setSelectedId("");
+      setStatus("Command: drawing cleared");
+    }
+  }
+
+  function handleCanvasClick(event: ThreeEvent<PointerEvent>) {
+    event.stopPropagation();
+    setSelectedId("");
+    setSelectedBlockIndex(null);
+    const point = pointFromEvent(event);
+
+    if (measureMode) {
+      if (!measureStart) {
+        setMeasureStart(point);
+        setMeasureEnd(null);
+        setStatus("Measurement start picked. Pick end point.");
+        return;
+      }
+
+      setMeasureEnd(point);
+      setStatus(`Measurement: ${formatFeetInches(Math.sqrt((point.x - measureStart.x) ** 2 + (point.z - measureStart.z) ** 2))}`);
+      return;
+    }
+
+    if (pendingDeviceLabel) {
+      setDevices((current) => [
+        ...current,
+        {
+          id: makeId(),
+          label: pendingDeviceLabel,
+          x: point.x,
+          z: point.z,
+          layer: pendingDeviceLabel === "CAM" ? "CCTV" : pendingDeviceLabel === "CR" || pendingDeviceLabel === "REX" ? "ACCESS" : pendingDeviceLabel === "DC" ? "SECURITY" : "FIRE_ALARM",
+        },
+      ]);
+      setStatus(`${pendingDeviceLabel} placed.`);
+      return;
+    }
+
+    if (command === "LINE" || command === "POLYLINE") {
+      if (!wallStart) {
+        setWallStart(point);
+        setStatus("Wall start picked. Pick end point.");
+        return;
+      }
+
+      setWalls((current) => [...current, { id: makeId(), start: wallStart, end: point, height: 2.8, layer: "ARCHITECTURE" }]);
+      setWallStart(null);
+      setStatus("Wall created.");
+      return;
+    }
+
+    if (command === "RECTANGLE" || command === "ROOM_LABEL") {
+      setRooms((current) => [
+        ...current,
+        { id: makeId(), label: `Building ${current.length + 1}`, x: point.x, z: point.z, width: 5, depth: 4, height: 2.8, stories: 1, shape: "RECTANGLE", layer: "ARCHITECTURE" },
+      ]);
+      setStatus("Room created.");
+      return;
+    }
+
+    if (command === "BLOCKS") {
+      setDoors((current) => [...current, { id: makeId(), x: point.x, z: point.z, layer: "ARCHITECTURE" }]);
+      setStatus("Door placed.");
+      return;
+    }
+
+    if (command === "TEXT") {
+      setWindows((current) => [...current, { id: makeId(), x: point.x, z: point.z, layer: "ARCHITECTURE" }]);
+      setStatus("Window placed.");
+      return;
+    }
+
+    const deviceMap: Partial<Record<CadCommand, { label: string; layer: Layer }>> = {
+      SMOKE: { label: "SD", layer: "FIRE_ALARM" },
+      HEAT: { label: "HD", layer: "FIRE_ALARM" },
+      PULL: { label: "PS", layer: "FIRE_ALARM" },
+      HORN_STROBE: { label: "HS", layer: "FIRE_ALARM" },
+      CAMERA: { label: "CAM", layer: "CCTV" },
+      CARD_READER: { label: "CR", layer: "ACCESS" },
+      REX: { label: "REX", layer: "ACCESS" },
+      DOOR_CONTACT: { label: "DC", layer: "SECURITY" },
+    };
+
+    const selectedDeviceTool = deviceMap[command];
+    if (selectedDeviceTool) {
+      setDevices((current) => [...current, { id: makeId(), label: selectedDeviceTool.label, x: point.x, z: point.z, layer: selectedDeviceTool.layer }]);
+      setStatus(`${selectedDeviceTool.label} placed.`);
+    }
+  }
+
+  function moveRoom(id: string, point: Vec2) {
+    setRooms((current) => current.map((room) => (room.id === id ? { ...room, x: point.x, z: point.z } : room)));
+  }
+
+  function moveDoor(id: string, point: Vec2) {
+    setDoors((current) =>
+      current.map((door) =>
+        door.id === id
+          ? { ...door, x: point.x, z: point.z }
+          : door,
+      ),
+    );
+  }
+
+  function moveWindow(id: string, point: Vec2) {
+    setWindows((current) =>
+      current.map((windowItem) =>
+        windowItem.id === id
+          ? { ...windowItem, x: point.x, z: point.z }
+          : windowItem,
+      ),
+    );
+  }
+
+  function moveStair(id: string, point: Vec2) {
+    setStairs((current) =>
+      current.map((stair) =>
+        stair.id === id
+          ? { ...stair, x: point.x, z: point.z }
+          : stair,
+      ),
+    );
+  }
+
+
+
+  function moveDevice(id: string, point: Vec2) {
+    setDevices((current) => current.map((device) => (device.id === id ? { ...device, x: point.x, z: point.z } : device)));
+  }
+
+  function handleDeviceSelect(device: Device) {
+    setSelectedId(device.id);
+
+    if (command !== "WIRE") return;
+
+    if (!wireStartId) {
+      setWireStartId(device.id);
+      setStatus(`Wire start: ${device.label} <span className="block text-[10px] font-bold">{device.name}</span>`);
+      return;
+    }
+
+    if (wireStartId === device.id) {
+      setWireStartId("");
+      return;
+    }
+
+    setWires((current) => [...current, { id: makeId(), fromId: wireStartId, toId: device.id, layer: "FIRE_ALARM" }]);
+    setWireStartId("");
+    setStatus("Wire created.");
+  }
+
+  function addBuildingShape(shape: BuildingShape, stories = 1) {
+    setRooms((current) => [
+      ...current,
+      {
+        id: makeId(),
+        label: `${shape === "RECTANGLE"
+  ? "Warehouse"
+  : shape === "L_SHAPE"
+  ? "School"
+  : shape === "U_SHAPE"
+  ? "Apartment"
+  : shape === "T_SHAPE"
+  ? "Shopping Center"
+  : shape === "Y_SHAPE"
+  ? "Hospital"
+  : shape === "DOUBLE_STACK"
+  ? "Office Building"
+  : shape === "TRIPLE_STACK"
+  ? "Campus"
+  : "High Rise"} ${current.length + 1}`,
+        x: current.length * 2,
+        z: current.length,
+        width: 6,
+        depth: 5,
+        height: 2.8,
+        stories,
+        shape,
+        layer: "ARCHITECTURE",
+      },
+    ]);
+
+    setStatus(`Added ${shape} building with ${stories} stories.`);
+  }
+
+  function syncTo2D() {
+    localStorage.setItem(
+      "sentinel-nexus-cad-sync",
+      JSON.stringify({ rooms, walls, doors, windows, devices, wires }),
+    );
+    setStatus("Synced 3D model to 2D local project data.");
+  }
+
+  function loadFrom2D() {
+    const saved = localStorage.getItem("sentinel-nexus-cad-sync");
+    if (!saved) {
+      setStatus("No synced 2D/3D data found.");
+      return;
+    }
+
+    const data = JSON.parse(saved);
+    setRooms(data.rooms || []);
+    setWalls(data.walls || []);
+    setDoors(data.doors || []);
+    setWindows(data.windows || []);
+    setDevices(data.devices || []);
+    setWires(data.wires || []);
+    setStatus("Loaded synced 2D/3D data.");
+  }
+
+  return (
+    <AppShell>
+      <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
+        <main className="space-y-4">
+          <div className="rounded-2xl border border-yellow-400/30 bg-black/20 p-3">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-3xl font-black text-yellow-300">Sentinel Nexus CAD</h1>
+              <div className="flex flex-wrap gap-2">
+                <button onClick={deselectAll} className="rounded-xl bg-white/20 px-4 py-3 font-black text-white">Deselect</button>
+                <button onClick={syncTo2D} className="rounded-xl bg-green-600 px-4 py-3 font-black text-white">Sync To 2D</button>
+                <button onClick={loadFrom2D} className="rounded-xl bg-blue-700 px-4 py-3 font-black text-white">Load Sync</button>
+                <a href="/blueprint-builder" className="rounded-xl bg-yellow-400 px-4 py-3 font-black text-black">Back To 2D</a>
+              </div>
+            </div>
+
+            <CadRibbon activeCommand={command} onCommand={handleCommand} />
+
+            <div className="mt-4 grid gap-3 rounded-2xl border border-yellow-400/30 bg-black/30 p-4 md:grid-cols-6">
+              <input
+                value={modelName}
+                onChange={(event) => setModelName(event.target.value)}
+                placeholder="3D model name"
+                className="rounded-xl bg-black/40 p-3 text-yellow-100 md:col-span-2"
+              />
+
+              <select
+                value={selectedModelId}
+                onChange={(event) => setSelectedModelId(event.target.value)}
+                className="rounded-xl bg-black/40 p-3 text-yellow-100 md:col-span-2"
+              >
+                <option value="">Saved 3D Models</option>
+                {savedModels.map((model) => (
+                  <option key={model.id} value={model.id}>
+                    {model.name}
+                  </option>
+                ))}
+              </select>
+
+              <button onClick={save3DModel} className="rounded-xl bg-green-600 p-3 font-black text-white">
+                Save
+              </button>
+
+              <button onClick={loadSelected3DModel} className="rounded-xl bg-blue-700 p-3 font-black text-white">
+                Load
+              </button>
+
+              <button onClick={renameSelected3DModel} className="rounded-md bg-yellow-400 px-1 py-1 text-[10px] font-bold text-black">
+                Rename
+              </button>
+
+              <button onClick={deleteSelected3DModel} className="rounded-xl bg-red-700 p-3 font-black text-white">
+                Delete
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl bg-black/80 p-3 font-mono text-yellow-300">{status}</div>
+
+          <div className="relative h-[760px] overflow-hidden rounded-[2rem] border border-yellow-400/30 bg-black">
+            <CadLegend />
+            <Canvas
+              camera={{ position: [9, 8, 9], fov: 50 }}
+              onPointerMissed={() => {
+                deselectAll();
+              }}
+            >
+              <CadScene
+                rooms={rooms}
+                walls={walls}
+                doors={doors}
+                windows={windows}
+                stairs={stairs}
+                devices={devices}
+                visibleLayers={visibleLayers}
+                selectedId={selectedId}
+                selectedBlockIndex={selectedBlockIndex}
+                draggingId={draggingId}
+                wireStartId={wireStartId}
+                controlsRef={controlsRef}
+                setSelectedId={setSelectedId}
+                setSelectedBlockIndex={setSelectedBlockIndex}
+                setSelectedDimension={setSelectedDimension}
+                setDraggingId={setDraggingId}
+                handleDeviceSelect={handleDeviceSelect}
+                Floor={Floor}
+                handleCanvasClick={handleCanvasClick}
+                moveRoom={moveRoom}
+                moveDoor={moveDoor}
+                moveWindow={moveWindow}
+                moveStair={moveStair}
+                moveDevice={moveDevice}
+                measureStart={measureStart}
+                measureEnd={measureEnd}
+                MeasurementLine={MeasurementLine}
+                wires={wires}
+                WireModel={WireModel}
+              />
+            </Canvas>
+
+            {selectedRoom && (
+              <div className="absolute bottom-3 left-3 right-3 rounded-2xl border border-yellow-400/40 bg-black/85 p-4 text-yellow-100 backdrop-blur-md">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <input
+                    value={selectedRoom.label}
+                    onChange={(event) =>
+                      setRooms((items) =>
+                        items.map((room) =>
+                          room.id === selectedRoom.id
+                            ? { ...room, label: event.target.value }
+                            : room,
+                        ),
+                      )
+                    }
+                    className="rounded-xl bg-white/10 p-3 font-black"
+                  />
+
+
+                  {selectedDimension && (
+                    <div className="grid gap-2 rounded-xl bg-black/25 p-3">
+                      <p className="text-sm font-black text-yellow-300">
+                        Edit {selectedDimension.toUpperCase()} by feet/inches
+                      </p>
+
+                      <input
+                        value={dimensionInput}
+                        onChange={(event) => setDimensionInput(event.target.value)}
+                        placeholder={`Example: 12, 12'6", or 150in`}
+                        className="rounded-xl bg-black/30 p-3 text-yellow-100"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextValue = parseFeetInches(dimensionInput);
+
+                          if (!nextValue || nextValue <= 0) {
+                            alert("Enter a valid measurement.");
+                            return;
+                          }
+
+                          setRooms((items) =>
+                            items.map((room) =>
+                              room.id === selectedRoom.id
+                                ? { ...room, [selectedDimension]: nextValue }
+                                : room,
+                            ),
+                          );
+
+                          setStatus(`${selectedDimension} set to ${formatFeetInches(nextValue)}`);
+                        }}
+                        className="rounded-xl bg-green-700 p-3 font-black text-white"
+                      >
+                        Apply Measurement
+                      </button>
+                    </div>
+                  )}
+
+                  
+                  <div className="grid gap-2 rounded-xl bg-black/30 p-3">
+                    <p className="text-sm font-black text-yellow-300">
+                      Type Exact Building Size
+                    </p>
+
+                    <input
+                      placeholder="Width example: 25, 25'6&quot;, 306in"
+                      className="rounded-xl bg-black/40 p-3 text-yellow-100"
+                      onBlur={(event) => {
+                        const value = parseFeetInches(event.target.value);
+                        if (!value || value <= 0) return;
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id ? { ...room, width: value } : room,
+                          ),
+                        );
+                      }}
+                    />
+
+                    <input
+                      placeholder="Depth example: 40, 40'3&quot;, 483in"
+                      className="rounded-xl bg-black/40 p-3 text-yellow-100"
+                      onBlur={(event) => {
+                        const value = parseFeetInches(event.target.value);
+                        if (!value || value <= 0) return;
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id ? { ...room, depth: value } : room,
+                          ),
+                        );
+                      }}
+                    />
+
+                    <input
+                      placeholder="Height example: 12, 12'0&quot;, 144in"
+                      className="rounded-xl bg-black/40 p-3 text-yellow-100"
+                      onBlur={(event) => {
+                        const value = parseFeetInches(event.target.value);
+                        if (!value || value <= 0) return;
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id ? { ...room, height: value } : room,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+
+                  <label className="grid gap-1 text-sm font-black">
+                    Width: {formatFeet(selectedRoom.width)}
+                    <input
+                      type="range"
+                      min="2"
+                      max="20"
+                      step="0.5"
+                      value={selectedRoom.width}
+                      onChange={(event) =>
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id
+                              ? { ...room, width: Number(event.target.value) }
+                              : room,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label className="grid gap-1 text-sm font-black">
+                    Depth: {formatFeet(selectedRoom.depth)}
+                    <input
+                      type="range"
+                      min="2"
+                      max="20"
+                      step="0.5"
+                      value={selectedRoom.depth}
+                      onChange={(event) =>
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id
+                              ? { ...room, depth: Number(event.target.value) }
+                              : room,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+
+                  <label className="grid gap-1 text-sm font-black">
+                    Height: {formatFeet(selectedRoom.height)}
+                    <input
+                      type="range"
+                      min="1"
+                      max="8"
+                      step="0.25"
+                      value={selectedRoom.height}
+                      onChange={(event) =>
+                        setRooms((items) =>
+                          items.map((room) =>
+                            room.id === selectedRoom.id
+                              ? { ...room, height: Number(event.target.value) }
+                              : room,
+                          ),
+                        )
+                      }
+                    />
+                  </label>
+
+                  <div className="grid gap-2 rounded-xl bg-black/25 p-3">
+                    <p className="text-sm font-black text-yellow-300">
+                      Floors: {selectedRoom.stories}
+                    </p>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRooms((items) =>
+                            items.map((room) =>
+                              room.id === selectedRoom.id
+                                ? { ...room, stories: Math.max(1, room.stories - 1) }
+                                : room,
+                            ),
+                          )
+                        }
+                        className="rounded-xl bg-red-700 p-3 font-black text-white"
+                      >
+                        - Floor
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setRooms((items) =>
+                            items.map((room) =>
+                              room.id === selectedRoom.id
+                                ? { ...room, stories: room.stories + 1 }
+                                : room,
+                            ),
+                          )
+                        }
+                        className="rounded-xl bg-green-700 p-3 font-black text-white"
+                      >
+                        + Floor
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </main>
+
+        <aside className="space-y-4 rounded-[2rem] border border-yellow-400/30 bg-black/15 p-5 backdrop-blur-sm">
+          <input
+            id="plan-import-input"
+            type="file"
+            accept=".pdf,.png,.jpg,.jpeg,.dxf"
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) handleImportFile(file);
+            }}
+          />
+
+                    <SentinelAiPanel
+            title="Sentinel AI 3D Builder"
+            blueprint={{
+              rooms,
+              walls,
+              doors,
+              windows,
+              stairs,
+              devices,
+              wires,
+              currentFloor,
+              stories: Math.max(
+                1,
+                ...rooms.map((room) =>
+                  Math.max(
+                    Number(room.stories ?? 1),
+                    Number(room.floor ?? 1),
+                  ),
+                ),
+              ),
+            }}
+            onRoomsGenerated={(generatedRooms, aiResponse, prompt) => {
+              const cad = convertAiBlueprintToCad({
+                ...aiResponse,
+                rooms: generatedRooms,
+              });
+
+              setRooms(cad.rooms as Room[]);
+              setWalls(cad.walls as Wall[]);
+              setDoors(cad.doors as Door[]);
+              setWindows(cad.windows as WindowItem[]);
+              setStairs(cad.stairs);
+              setDevices(cad.devices as Device[]);
+              setCurrentFloor(1);
+              deselectAll();
+
+              setStatus(
+                `AI imported ${cad.rooms.length} rooms, ${cad.doors.length} doors, ${cad.windows.length} windows, ${cad.stairs.length} stairs, ${cad.devices.length} devices.`
+              );
+            }}
+            onDevicesGenerated={(generatedDevices) => {
+              const convertedDevices = generatedDevices.map((device, index) => ({
+                id: device.id || `ai-device-${Date.now()}-${index}`,
+                label: device.label || device.type || "SD",
+                type: device.type || device.label || "SD",
+                x: Number(device.x ?? 0),
+                z: Number(device.z ?? device.y ?? 0),
+                y: Number(device.y3d ?? 3),
+                floor: Number(device.floor ?? currentFloor),
+                layer: device.layer || "FIRE_ALARM",
+              }));
+
+              setDevices((current) => [...current, ...convertedDevices]);
+              setStatus(`AI placed ${convertedDevices.length} device(s).`);
+            }}
+          />
+
+          <Cad3DUpgradePanel
+            currentFloor={currentFloor}
+            snapEnabled={snapEnabled}
+            onAction={handleUpgradeAction}
+          />
+
+          <ObjectTree
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            items={[
+              ...rooms.map((room) => ({ id: room.id, label: room.label, type: "Building" })),
+              ...devices.map((device) => ({ id: device.id, label: device.label, type: "Device" })),
+            ]}
+          />
+
+          <DeviceDragPalette
+            onPick={(label) => {
+              setPendingDeviceLabel(label);
+              setStatus(`Click grid to place ${label}.`);
+            }}
+          />
+
+          <button
+            onClick={() => exportCanvasPdf("cad-3d-export-area", "sentinel-nexus-3d.pdf")}
+            className="w-full rounded-xl bg-blue-700 p-3 font-black text-white"
+          >
+            Export PDF
+          </button>
+<h2 className="text-2xl font-black text-yellow-300">Properties</h2>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedId("");
+              setSelectedBlockIndex(null);
+              setSelectedDimension(null);
+              setDraggingId("");
+              setResizeDrag(null);
+              setStatus("Selection cleared.");
+            }}
+            className="mt-3 w-full rounded-xl bg-gray-700 p-3 font-black text-white"
+          >
+            Deselect Selection
+          </button>
+
+          <div className="mt-5">
+            <p className="font-black text-yellow-300">Active Layer</p>
+            <select value={activeLayer} onChange={(event) => setActiveLayer(event.target.value as Layer)} className="mt-2 w-full rounded-xl bg-black/30 p-3">
+              {Object.entries(layers).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+          </div>
+
+          <div className="mt-6">
+            <p className="font-black text-yellow-300">Layer Manager</p>
+            <div className="mt-2 grid gap-2">
+              {(Object.keys(layers) as Layer[]).map((layer) => (
+                <button
+                  key={layer}
+                  onClick={() => setVisibleLayers((current) => ({ ...current, [layer]: !current[layer] }))}
+                  className="rounded-lg bg-black/25 px-2 py-1.5 text-left text-xs font-bold"
+                >
+                  {visibleLayers[layer] ? "ON" : "OFF"} — {layers[layer]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-6">
+            <p className="font-black text-yellow-300">Building Templates</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {[
+                { label: "Warehouse", shape: "RECTANGLE", stories: 1 },
+                { label: "School", shape: "L_SHAPE", stories: 2 },
+                { label: "Apartment", shape: "U_SHAPE", stories: 3 },
+                { label: "Shopping Center", shape: "T_SHAPE", stories: 1 },
+                { label: "Hospital", shape: "Y_SHAPE", stories: 5 },
+                { label: "Office Building", shape: "DOUBLE_STACK", stories: 4 },
+                { label: "Campus", shape: "TRIPLE_STACK", stories: 3 },
+                { label: "High Rise", shape: "TOWER", stories: 8 },
+                { label: "Data Center", shape: "RECTANGLE", stories: 2 },
+                { label: "Fire Station", shape: "DOUBLE_STACK", stories: 2 },
+                { label: "Police Station", shape: "T_SHAPE", stories: 2 },
+                { label: "Hotel", shape: "TOWER", stories: 8 },
+                { label: "Airport", shape: "TRIPLE_STACK", stories: 2 },
+                { label: "Industrial Plant", shape: "RECTANGLE", stories: 1 },
+                { label: "Power Plant", shape: "U_SHAPE", stories: 2 },
+                { label: "Stadium", shape: "U_SHAPE", stories: 3 },
+                { label: "Convention Center", shape: "TRIPLE_STACK", stories: 2 },
+              ].map((template) => (
+                <button
+                  key={template.label}
+                  onClick={() => {
+                    setRooms([]);
+                    setWalls([]);
+                    setSelectedId("");
+                    setDraggingId("");
+                    setResizeDrag(null);
+                    addBuildingShape(template.shape as BuildingShape, template.stories);
+                  }}
+                  className="rounded-md bg-purple-700 px-1 py-1 text-[9px] font-bold text-white"
+                >
+                  {template.label}
+                </button>
+              ))}
+            </div>
+
+            <p className="mt-6 font-black text-yellow-300">Device Palette</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {devicePalette.map((device) => (
+                <button
+                  key={device.label}
+                  onClick={() => {
+                    setCommand(device.label === "CAM" ? "CAMERA" : device.label === "CR" ? "CARD_READER" : device.label === "REX" ? "REX" : device.label === "DC" ? "DOOR_CONTACT" : device.label === "SD" ? "SMOKE" : device.label === "HD" ? "HEAT" : device.label === "PS" ? "PULL" : "HORN_STROBE");
+                    setStatus(`Command: place ${device.name}`);
+                  }}
+                  className="rounded-md bg-yellow-400 px-1 py-1 text-[10px] font-bold text-black"
+                >
+                  {device.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {selectedDevice && (
+            <div className="mt-6 grid gap-3">
+              <p className="font-black text-yellow-300">Selected Device</p>
+              <input value={selectedDevice.label} onChange={(event) => setDevices((items) => items.map((device) => device.id === selectedDevice.id ? { ...device, label: event.target.value } : device))} className="rounded-lg bg-black/30 px-2 py-1.5 text-xs" />
+            </div>
+          )}
+
+          <div className="mt-6">
+            <p className="font-black text-yellow-300">Measurement Result</p>
+            <div className="mt-2 rounded-xl bg-black/25 p-3">
+              {measurementFeet > 0 ? formatFeetInches(measurementFeet) : "No measurement selected"}
+            </div>
+
+            <p className="mt-6 font-black text-yellow-300">Material Count</p>
+            <div className="mt-2 grid gap-2">
+              {Object.entries(materialCount).map(([label, count]) => (
+                <div key={label} className="rounded-xl bg-black/25 p-3">{label}: <b>{count}</b></div>
+              ))}
+            </div>
+          </div>
+        </aside>
+      </div>
+    </AppShell>
+  );
+}
+
+function Floor({
+  onClick,
+  onMove,
+  onStop,
+}: {
+  onClick: (event: ThreeEvent<PointerEvent>) => void;
+  onMove: (point: Vec2) => void;
+  onStop: () => void;
+}) {
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      onClick={onClick}
+      onPointerMove={(event) => onMove(pointFromEvent(event))}
+      onPointerUp={onStop}
+      onPointerLeave={onStop}
+    >
+      <planeGeometry args={[80, 80]} />
+      <meshStandardMaterial transparent opacity={0} />
+    </mesh>
+  );
+}
+
+function WallModel({
+  wall,
+  selected,
+  onSelect,
+}: {
+  wall: Wall;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const dx = wall.end.x - wall.start.x;
+  const dz = wall.end.z - wall.start.z;
+  const lengthFeet = Math.sqrt(dx * dx + dz * dz);
+  const lengthInches = feetToInches(lengthFeet);
+  const angle = Math.atan2(dz, dx);
+  const midX = (wall.start.x + wall.end.x) / 2;
+  const midZ = (wall.start.z + wall.end.z) / 2;
+
+  return (
+    <group onClick={(event) => { event.stopPropagation(); onSelect(); }}>
+      <mesh position={[midX, wall.height / 2, midZ]} rotation={[0, -angle, 0]}>
+        <boxGeometry args={[lengthFeet, wall.height, 0.18]} />
+        <meshStandardMaterial
+          color={selected ? "#22c55e" : "#f8fafc"}
+          transparent
+          opacity={selected ? 0.28 : 0.18}
+        />
+      </mesh>
+
+      <Text position={[midX, wall.height + 0.5, midZ]} fontSize={0.35} color="#22c55e">
+        {formatFeetInches(lengthFeet)} / {Math.round(lengthInches)} in
+      </Text>
+    </group>
+  );
+}
+
+function RoomModel({
+  room,
+  selected,
+  selectedBlockIndex,
+  onSelect,
+  onBlockSelect,
+  onDragStart,
+}: {
+  room: Room;
+  selected: boolean;
+  selectedBlockIndex: number | null;
+  onSelect: () => void;
+  onSelectDimension: (dimension: "width" | "depth" | "height") => void;
+  onBlockSelect: (index: number) => void;
+  onDragStart: () => void;
+  onResizeStart: (side: "east" | "west" | "north" | "south") => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const totalHeight = room.height * room.stories;
+  const blocks = getBuildingBlocks(room);
+
+  return (
+    <group
+      position={[room.x, 0, room.z]}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSelect();
+        onDragStart();
+      }}
+    >
+      {blocks.map((block, index) => {
+        const wallThickness = 0.12;
+
+        return (
+          <group key={index} position={[block.x, 0, block.z]} rotation={[0, block.rotation || 0, 0]}>
+            <mesh position={[0, 0.02, 0]}>
+              <boxGeometry args={[block.width, 0.04, block.depth]} />
+              <meshStandardMaterial color="#111827" transparent opacity={0.42} />
+            </mesh>
+
+            <mesh position={[0, totalHeight / 2, -block.depth / 2]}>
+              <boxGeometry args={[block.width, totalHeight, wallThickness]} />
+              <meshStandardMaterial color="#fde047" transparent opacity={selected ? 0.55 : 0.42} />
+            </mesh>
+
+            <mesh position={[0, totalHeight / 2, block.depth / 2]}>
+              <boxGeometry args={[block.width, totalHeight, wallThickness]} />
+              <meshStandardMaterial color="#fde047" transparent opacity={selected ? 0.55 : 0.42} />
+            </mesh>
+
+            <mesh position={[-block.width / 2, totalHeight / 2, 0]}>
+              <boxGeometry args={[wallThickness, totalHeight, block.depth]} />
+              <meshStandardMaterial color="#fde047" transparent opacity={selected ? 0.55 : 0.42} />
+            </mesh>
+
+            <mesh position={[block.width / 2, totalHeight / 2, 0]}>
+              <boxGeometry args={[wallThickness, totalHeight, block.depth]} />
+              <meshStandardMaterial color="#fde047" transparent opacity={selected ? 0.55 : 0.42} />
+            </mesh>
+
+            <lineSegments position={[0, totalHeight / 2, 0]}>
+              <edgesGeometry args={[new THREE.BoxGeometry(block.width, totalHeight, block.depth)]} />
+              <lineBasicMaterial color={selectedBlockIndex === index ? "#22c55e" : selected ? "#ef4444" : "#fde047"} />
+            </lineSegments>
+          </group>
+        );
+      })}
+
+      {Array.from({ length: Math.max(0, room.stories - 1) }).map((_, floor) => (
+        <group key={`floor-${floor}`} position={[0, room.height * (floor + 1), 0]}>
+          {blocks.map((block, index) => (
+            <lineSegments key={index} position={[block.x, 0, block.z]}>
+              <edgesGeometry args={[new THREE.BoxGeometry(block.width, 0.03, block.depth)]} />
+              <lineBasicMaterial color="#facc15" />
+            </lineSegments>
+          ))}
+        </group>
+      ))}
+
+      <Text position={[0, totalHeight + 0.35, 0]} fontSize={0.4} color="#fde047">
+        {room.label} - {room.stories}F
+      </Text>
+
+      {(hovered || selected) && (
+        <Text position={[0, totalHeight + 0.9, 0]} fontSize={0.28} color="#22c55e">
+          {`W ${formatFeetInches(room.width)} | D ${formatFeetInches(room.depth)} | H ${formatFeetInches(totalHeight)}`}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+function getBuildingBlocks(room: Room): BuildingBlock[] {
+  const w = room.width;
+  const d = room.depth;
+
+  if (room.shape === "L_SHAPE") {
+    return [
+      { x: 0, z: 0, width: w, depth: d * 0.45 },
+      { x: -w * 0.275, z: d * 0.275, width: w * 0.45, depth: d * 0.55 },
+    ];
+  }
+
+  if (room.shape === "U_SHAPE") {
+    return [
+      { x: 0, z: -d * 0.3, width: w, depth: d * 0.35 },
+      { x: -w * 0.35, z: d * 0.15, width: w * 0.3, depth: d * 0.65 },
+      { x: w * 0.35, z: d * 0.15, width: w * 0.3, depth: d * 0.65 },
+    ];
+  }
+
+  if (room.shape === "T_SHAPE") {
+    return [
+      { x: 0, z: -d * 0.25, width: w, depth: d * 0.35 },
+      { x: 0, z: d * 0.2, width: w * 0.35, depth: d * 0.7 },
+    ];
+  }
+
+  if (room.shape === "Y_SHAPE") {
+    return [
+      {
+        x: 0,
+        z: d * 0.18,
+        width: w * 0.28,
+        depth: d,
+        rotation: 0,
+      },
+      {
+        x: -w * 0.28,
+        z: -d * 0.2,
+        width: w * 0.28,
+        depth: d * 0.85,
+        rotation: Math.PI / 3,
+      },
+      {
+        x: w * 0.28,
+        z: -d * 0.2,
+        width: w * 0.28,
+        depth: d * 0.85,
+        rotation: -Math.PI / 3,
+      },
+    ];
+  }
+
+  if (room.shape === "DOUBLE_STACK") {
+    return [
+      { x: 0, z: -d * 0.25, width: w, depth: d * 0.45 },
+      { x: 0, z: d * 0.25, width: w, depth: d * 0.45 },
+    ];
+  }
+
+  if (room.shape === "TRIPLE_STACK") {
+    return [
+      { x: 0, z: -d * 0.33, width: w, depth: d * 0.28 },
+      { x: 0, z: 0, width: w, depth: d * 0.28 },
+      { x: 0, z: d * 0.33, width: w, depth: d * 0.28 },
+    ];
+  }
+
+  if (room.shape === "TOWER") {
+    return [{ x: 0, z: 0, width: w * 0.65, depth: d * 0.65 }];
+  }
+
+  return [{ x: 0, z: 0, width: w, depth: d }];
+}
+
+function DoorModel({ door }: { door: Door }) {
+  const [hovered, setHovered] = useState(false);
+  const doorData = door as Door & { width?: number; label?: string; side?: "NORTH" | "SOUTH" | "EAST" | "WEST" };
+  const width = Math.max(0.75, Number(doorData.width ?? 1));
+  const isEastWest = doorData.side === "EAST" || doorData.side === "WEST";
+
+  return (
+    <group
+      position={[door.x, 0.08, door.z]}
+      rotation={[0, isEastWest ? Math.PI / 2 : 0, 0]}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      <mesh position={[0, 1.05, 0]}>
+        <boxGeometry args={[width, 2.1, 0.1]} />
+        <meshStandardMaterial color="#92400e" transparent opacity={0.96} />
+      </mesh>
+
+      <lineSegments position={[0, 1.05, 0]}>
+        <edgesGeometry args={[new THREE.BoxGeometry(width, 2.1, 0.1)]} />
+        <lineBasicMaterial color="#fb923c" />
+      </lineSegments>
+
+      <mesh position={[width / 2, 0.12, width / 2]} rotation={[-Math.PI / 2, 0, 0]}>
+        <ringGeometry args={[width, width + 0.03, 32, 1, 0, Math.PI / 2]} />
+        <meshBasicMaterial color="#fb923c" />
+      </mesh>
+
+      <Text position={[0, 2.35, 0]} fontSize={0.22} color="#fb923c">
+        {doorData.label || "Door"}
+      </Text>
+
+      {hovered && (
+        <Text position={[0, 2.75, 0]} fontSize={0.2} color="#22c55e">
+          {`Door ${formatFeetInches(width)}`}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+function WindowModel({ item }: { item: WindowItem }) {
+  const [hovered, setHovered] = useState(false);
+  const windowData = item as WindowItem & {
+    width?: number;
+    label?: string;
+    y?: number;
+    side?: "NORTH" | "SOUTH" | "EAST" | "WEST";
+  };
+  const width = Math.max(0.75, Number(windowData.width ?? 1.2));
+  const isEastWest = windowData.side === "EAST" || windowData.side === "WEST";
+
+  return (
+    <group
+      position={[item.x, Number(windowData.y ?? 1.65), item.z]}
+      rotation={[0, isEastWest ? Math.PI / 2 : 0, 0]}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+    >
+      <mesh>
+        <boxGeometry args={[width, 0.8, 0.08]} />
+        <meshStandardMaterial color="#38bdf8" transparent opacity={0.82} />
+      </mesh>
+
+      <lineSegments>
+        <edgesGeometry args={[new THREE.BoxGeometry(width, 0.8, 0.08)]} />
+        <lineBasicMaterial color="#e0f2fe" />
+      </lineSegments>
+
+      <Text position={[0, 0.72, 0]} fontSize={0.18} color="#38bdf8">
+        {windowData.label || "Window"}
+      </Text>
+
+      {hovered && (
+        <Text position={[0, 1.06, 0]} fontSize={0.18} color="#22c55e">
+          {`Window ${formatFeetInches(width)}`}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+function DeviceMarker({
+  device,
+  selected,
+  onSelect,
+  onDragStart,
+}: {
+  device: Device;
+  selected: boolean;
+  onSelect: () => void;
+  onDragStart: () => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const y = Number((device as Device & { y?: number }).y ?? 2.9);
+  const isHornStrobe = device.label === "HS" || device.label === "HORN_STROBE";
+  const color = selected ? "#ef4444" : isHornStrobe ? "#fb923c" : "#fde047";
+
+  return (
+    <group
+      position={[device.x, y, device.z]}
+      onPointerOver={(event) => {
+        event.stopPropagation();
+        setHovered(true);
+      }}
+      onPointerOut={() => setHovered(false)}
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onSelect();
+        onDragStart();
+      }}
+    >
+      {isHornStrobe ? (
+        <mesh>
+          <boxGeometry args={[0.42, 0.3, 0.12]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      ) : (
+        <mesh>
+          <cylinderGeometry args={[selected ? 0.34 : 0.26, selected ? 0.34 : 0.26, 0.08, 28]} />
+          <meshStandardMaterial color={color} />
+        </mesh>
+      )}
+
+      <Text position={[0, 0.42, 0]} fontSize={0.24} color={color}>{device.label}</Text>
+
+      {hovered && (
+        <Text position={[0, 0.82, 0]} fontSize={0.19} color="#22c55e">
+          {`${device.label} | X ${formatFeetInches(device.x)} | Z ${formatFeetInches(device.z)}`}
+        </Text>
+      )}
+    </group>
+  );
+}
+
+function WireModel({ from, to }: { from: Device; to: Device }) {
+  const points = [
+    new THREE.Vector3(from.x, 2.7, from.z),
+    new THREE.Vector3(to.x, 2.7, to.z),
+  ];
+
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: "#22c55e" });
+  const line = new THREE.Line(geometry, material);
+
+  return <primitive object={line} />;
+}
+
+
+function MeasurementLine({ start, end }: { start: Vec2; end: Vec2 }) {
+  const points = [
+    new THREE.Vector3(start.x, 0.08, start.z),
+    new THREE.Vector3(end.x, 0.08, end.z),
+  ];
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color: "#22c55e" });
+  const line = new THREE.Line(geometry, material);
+  const distance = Math.sqrt((end.x - start.x) ** 2 + (end.z - start.z) ** 2);
+
+  return (
+    <group>
+      <primitive object={line} />
+      <Text
+        position={[(start.x + end.x) / 2, 0.35, (start.z + end.z) / 2]}
+        fontSize={0.35}
+        color="#22c55e"
+      >
+        {formatFeetInches(distance)}
+      </Text>
+    </group>
+  );
+}
+
+
+function ResizeHandle({
+  position,
+  size,
+  color,
+  onClick,
+  onPointerDown,
+}: {
+  position: [number, number, number];
+  size: [number, number, number];
+  color: string;
+  onClick: () => void;
+  onPointerDown?: () => void;
+}) {
+  return (
+    <mesh
+      position={position}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+        onPointerDown?.();
+      }}
+    >
+      <boxGeometry args={size} />
+      <meshStandardMaterial color={color} transparent opacity={0.5} />
+    </mesh>
+  );
+}
