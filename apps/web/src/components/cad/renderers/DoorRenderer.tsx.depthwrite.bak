@@ -73,7 +73,6 @@ export default function DoorRenderer({
           color="#000000"
           transparent
           opacity={0}
-          depthWrite={false}
         />
       </mesh>
 

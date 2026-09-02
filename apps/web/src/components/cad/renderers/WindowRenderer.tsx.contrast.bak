@@ -67,7 +67,7 @@ export default function WindowRenderer({
 
       <lineSegments>
         <edgesGeometry args={[new THREE.BoxGeometry(width + 0.08, height + 0.08, thickness)]} />
-        <lineBasicMaterial color={selected ? "#22c55e" : "#3f3f46"} />
+        <lineBasicMaterial color={selected ? "#22c55e" : "#7a7a7a"} transparent opacity={selected ? 1 : 0.35} />
       </lineSegments>
 
       <mesh position={[0, 0, thickness / 2 + 0.03]}>
