@@ -127,7 +127,7 @@ export default function ExteriorWallRenderer({
         </>
       )}
 
-      {!footprint.hideWalls && Array.from({ length: Math.max(0, footprint.stories - 1) }).map((_, floor) => (
+      {Array.from({ length: Math.max(0, footprint.stories - 1) }).map((_, floor) => (
         <mesh key={floor} position={[centerX, footprint.height * (floor + 1), centerZ]}>
           <boxGeometry args={[width + 0.02, 0.06, depth + 0.02]} />
           <meshStandardMaterial color="#8f7d5c" roughness={0.9} />
