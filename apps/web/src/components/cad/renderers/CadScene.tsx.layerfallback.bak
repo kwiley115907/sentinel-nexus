@@ -123,11 +123,11 @@ export default function CadScene({
         <DimensionRenderer key={dimension.id} dimension={dimension} />
       ))}
 
-      {doors.filter((door: any) => door.layer ? visibleLayers[door.layer] : true).map((door: any) => (
+      {doors.filter((door: any) => visibleLayers[door.layer]).map((door: any) => (
         <DoorRenderer key={door.id} door={door} selected={selectedId === door.id} onSelect={() => setSelectedId(door.id)} />
       ))}
 
-      {windows.filter((windowItem: any) => windowItem.layer ? visibleLayers[windowItem.layer] : true).map((windowItem: any) => (
+      {windows.filter((windowItem: any) => visibleLayers[windowItem.layer]).map((windowItem: any) => (
         <WindowRenderer key={windowItem.id} windowItem={windowItem} selected={selectedId === windowItem.id} onSelect={() => setSelectedId(windowItem.id)} />
       ))}
 
