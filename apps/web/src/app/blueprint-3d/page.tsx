@@ -152,6 +152,7 @@ export default function Blueprint3DPage() {
   const [savedModels, setSavedModels] = useState<Saved3DModel[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelName, setModelName] = useState("Sentinel Nexus 3D Model");
+  const [companyId, setCompanyId] = useState<string | null>(null);
 
   const [visibleLayers, setVisibleLayers] = useState<Record<Layer, boolean>>({
     ARCHITECTURE: true,
@@ -220,9 +221,12 @@ export default function Blueprint3DPage() {
   }, [devices]);
 
   async function loadSavedModels() {
+    if (!companyId) return;
+
     const { data, error } = await supabase
       .from("blueprint_3d_models")
       .select("id,name,model_data")
+      .eq("company_id", companyId)
       .order("created_at", { ascending: false });
 
     if (error) {
@@ -237,7 +241,18 @@ export default function Blueprint3DPage() {
   }
 
   async function save3DModel() {
+    if (!companyId) {
+      setStatus("Still setting up your company - try again in a moment.");
+      return;
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     const { error } = await supabase.from("blueprint_3d_models").insert({
+      company_id: companyId,
+      created_by: user?.id,
       name: modelName || "Sentinel Nexus 3D Model",
       model_data: {
         rooms,
@@ -321,8 +336,18 @@ export default function Blueprint3DPage() {
   }
 
   useEffect(() => {
-    loadSavedModels();
+    supabase.rpc("ensure_company_for_current_user").then(({ data, error }) => {
+      if (error) {
+        setStatus(error.message);
+        return;
+      }
+      setCompanyId(data as string);
+    });
   }, []);
+
+  useEffect(() => {
+    loadSavedModels();
+  }, [companyId]);
 
   function deselectAll() {
     setSelectedId("");
