@@ -17,7 +17,14 @@ import * as THREE from "three";
 import CadDimensionLine from "@/components/cad/CadDimensionLine";
 import RoomRenderer from "@/components/cad/renderers/RoomRenderer";
 import ExteriorWallRenderer, { getExteriorFootprintFromRooms } from "@/components/cad/renderers/ExteriorWallRenderer";
-import InteriorWallRenderer, { generateInteriorWallsFromRooms } from "@/components/cad/renderers/InteriorWallRenderer";
+import InteriorWallRenderer, {
+  generateInteriorWallsFromRooms,
+  classifyWalls,
+  type ExteriorMaterial,
+  type InteriorFinish,
+  type WallSide,
+} from "@/components/cad/renderers/InteriorWallRenderer";
+import BuildingMaterialsPanel from "@/components/cad/BuildingMaterialsPanel";
 import DoorRenderer from "@/components/cad/renderers/DoorRenderer";
 import WindowRenderer from "@/components/cad/renderers/WindowRenderer";
 import StairRenderer from "@/components/cad/renderers/StairRenderer";
@@ -86,7 +93,16 @@ type Saved3DModel = {
     windows?: WindowItem[];
     devices?: Device[];
     wires?: Wire[];
+    exteriorMaterials?: Record<WallSide, ExteriorMaterial>;
+    interiorFinish?: InteriorFinish;
   };
+};
+
+const DEFAULT_EXTERIOR_MATERIALS: Record<WallSide, ExteriorMaterial> = {
+  NORTH: "STUCCO",
+  SOUTH: "STUCCO",
+  EAST: "STUCCO",
+  WEST: "STUCCO",
 };
 
 const layers: Record<Layer, string> = {
@@ -153,6 +169,10 @@ export default function Blueprint3DPage() {
   const [selectedModelId, setSelectedModelId] = useState("");
   const [modelName, setModelName] = useState("Sentinel Nexus 3D Model");
   const [companyId, setCompanyId] = useState<string | null>(null);
+  const [exteriorMaterials, setExteriorMaterials] = useState<Record<WallSide, ExteriorMaterial>>(
+    DEFAULT_EXTERIOR_MATERIALS
+  );
+  const [interiorFinish, setInteriorFinish] = useState<InteriorFinish>("SHEETROCK");
 
   const [visibleLayers, setVisibleLayers] = useState<Record<Layer, boolean>>({
     ARCHITECTURE: true,
@@ -220,6 +240,35 @@ export default function Blueprint3DPage() {
     }, {});
   }, [devices]);
 
+  // Every room automatically gets 4 walls around its perimeter (no more
+  // rooms rendering as bare floor slabs), classified as exterior (using
+  // the chosen siding for that side) or interior (using the chosen
+  // finish) based on whether they sit on the outer boundary of the
+  // combined footprint of every room. Manually-drawn walls get the same
+  // treatment layered on top.
+  const renderWalls = useMemo(() => {
+    const realRooms = rooms.filter((room) => room.kind !== "SHELL");
+    const footprint =
+      realRooms.length > 0
+        ? {
+            minX: Math.min(...realRooms.map((room) => room.x - room.width / 2)),
+            maxX: Math.max(...realRooms.map((room) => room.x + room.width / 2)),
+            minZ: Math.min(...realRooms.map((room) => room.z - room.depth / 2)),
+            maxZ: Math.max(...realRooms.map((room) => room.z + room.depth / 2)),
+          }
+        : null;
+
+    const autoWalls = generateInteriorWallsFromRooms(realRooms).map((wall) => ({
+      ...wall,
+      layer: "ARCHITECTURE" as Layer,
+    }));
+
+    return [
+      ...classifyWalls(autoWalls, footprint, exteriorMaterials, interiorFinish),
+      ...classifyWalls(walls, footprint, exteriorMaterials, interiorFinish),
+    ];
+  }, [rooms, walls, exteriorMaterials, interiorFinish]);
+
   async function loadSavedModels() {
     if (!companyId) return;
 
@@ -261,6 +310,8 @@ export default function Blueprint3DPage() {
         windows,
         devices,
         wires,
+        exteriorMaterials,
+        interiorFinish,
       },
     });
 
@@ -287,6 +338,8 @@ export default function Blueprint3DPage() {
     setWindows(model.model_data?.windows || []);
     setDevices(model.model_data?.devices || []);
     setWires(model.model_data?.wires || []);
+    setExteriorMaterials(model.model_data?.exteriorMaterials || DEFAULT_EXTERIOR_MATERIALS);
+    setInteriorFinish(model.model_data?.interiorFinish || "SHEETROCK");
     setModelName(model.name);
     setStatus(`Loaded ${model.name}`);
   }
@@ -779,7 +832,7 @@ export default function Blueprint3DPage() {
             >
               <CadScene
                 rooms={rooms}
-                walls={walls}
+                walls={renderWalls}
                 doors={doors}
                 windows={windows}
                 stairs={stairs}
@@ -1130,6 +1183,15 @@ export default function Blueprint3DPage() {
             currentFloor={currentFloor}
             snapEnabled={snapEnabled}
             onAction={handleUpgradeAction}
+          />
+
+          <BuildingMaterialsPanel
+            exteriorMaterials={exteriorMaterials}
+            onExteriorChange={(side, material) =>
+              setExteriorMaterials((current) => ({ ...current, [side]: material }))
+            }
+            interiorFinish={interiorFinish}
+            onInteriorChange={setInteriorFinish}
           />
 
           <ObjectTree

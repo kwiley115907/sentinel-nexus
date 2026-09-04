@@ -558,14 +558,19 @@ export default function SentinelAiPanel({
       }
 
       if (Array.isArray(data.rooms)) {
+        // Whole-building generation: onRoomsGenerated already derives its
+        // own correctly-positioned devices from the new room layout. The
+        // raw data.devices from this same response were never checked
+        // against THAT layout (only against whatever rooms existed before
+        // this response arrived), so applying both doubled up devices and
+        // scattered a copy of them wherever the AI's raw, unnormalized
+        // coordinates happened to land.
         onRoomsGenerated?.(
           data.rooms,
           data,
           customPrompt,
         );
-      }
-
-      if (Array.isArray(data.devices)) {
+      } else if (Array.isArray(data.devices)) {
         onDevicesGenerated?.(
           data.devices,
         );
