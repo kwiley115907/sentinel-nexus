@@ -20,6 +20,7 @@ import ExteriorWallRenderer, { getExteriorFootprintFromRooms } from "@/component
 import InteriorWallRenderer, {
   generateInteriorWallsFromRooms,
   classifyWalls,
+  dedupeSharedWalls,
   type ExteriorMaterial,
   type InteriorFinish,
   type WallSide,
@@ -258,10 +259,12 @@ export default function Blueprint3DPage() {
           }
         : null;
 
-    const autoWalls = generateInteriorWallsFromRooms(realRooms).map((wall) => ({
-      ...wall,
-      layer: "ARCHITECTURE" as Layer,
-    }));
+    const autoWalls = dedupeSharedWalls(
+      generateInteriorWallsFromRooms(realRooms).map((wall) => ({
+        ...wall,
+        layer: "ARCHITECTURE" as Layer,
+      }))
+    );
 
     return [
       ...classifyWalls(autoWalls, footprint, exteriorMaterials, interiorFinish),

@@ -173,6 +173,34 @@ export function generateInteriorWallsFromRooms(
 }
 
 /**
+ * Two rooms placed edge to edge each generate their own wall along the
+ * shared boundary, so that boundary would otherwise render as two
+ * overlapping wall boxes. Collapses any walls that sit on the exact
+ * same line and span the same range down to one.
+ */
+export function dedupeSharedWalls(walls: InteriorWall3D[]): InteriorWall3D[] {
+  const EPSILON = 0.01;
+  const round = (value: number) => Math.round(value / EPSILON);
+
+  const seen = new Map<string, InteriorWall3D>();
+
+  for (const wall of walls) {
+    const vertical = Math.abs(wall.start.x - wall.end.x) < EPSILON;
+    const floor = wall.floor ?? 1;
+
+    const key = vertical
+      ? `V:${round(wall.start.x)}:${round(Math.min(wall.start.z, wall.end.z))}:${round(Math.max(wall.start.z, wall.end.z))}:${floor}`
+      : `H:${round(wall.start.z)}:${round(Math.min(wall.start.x, wall.end.x))}:${round(Math.max(wall.start.x, wall.end.x))}:${floor}`;
+
+    if (!seen.has(key)) {
+      seen.set(key, wall);
+    }
+  }
+
+  return Array.from(seen.values());
+}
+
+/**
  * Tags each auto-generated perimeter wall as exterior (with the chosen
  * siding/stucco/brick for that side of the building) or interior (with
  * the chosen sheetrock/tile finish), based on whether it sits on the
