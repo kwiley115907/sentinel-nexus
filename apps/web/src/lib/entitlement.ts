@@ -5,16 +5,19 @@ export type Entitlement = {
   companyId: string | null;
   plan: string;
   status: string;
-  /** True once the company has an active/trialing paid (non-basic) plan. */
+  /** True once the company has an active/trialing paid (non-free) plan. */
   entitled: boolean;
 };
 
 const ACTIVE_STATUSES = new Set(["active", "trialing"]);
 
 /**
- * A company only unlocks the paid feature set once it's on a non-basic
+ * A company only unlocks the paid feature set once it's on a non-free
  * plan AND that plan is actually active/trialing - a canceled Pro
- * subscription is not entitled just because `plan` still says "pro".
+ * subscription is not entitled just because `plan` still says "monthly".
+ * plan/status values must match the check constraints on
+ * public.subscriptions: plan in ('free','monthly','annual'), status in
+ * ('inactive','trialing','active','past_due','canceled').
  */
 export async function getEntitlement(
   supabase: SupabaseClient,
@@ -28,7 +31,7 @@ export async function getEntitlement(
     .maybeSingle();
 
   if (!membership) {
-    return { userId, companyId: null, plan: "basic", status: "inactive", entitled: false };
+    return { userId, companyId: null, plan: "free", status: "inactive", entitled: false };
   }
 
   const { data: subscription } = await supabase
@@ -37,9 +40,9 @@ export async function getEntitlement(
     .eq("company_id", membership.company_id)
     .maybeSingle();
 
-  const plan = subscription?.plan ?? "basic";
+  const plan = subscription?.plan ?? "free";
   const status = subscription?.status ?? "inactive";
-  const entitled = plan !== "basic" && ACTIVE_STATUSES.has(status);
+  const entitled = plan !== "free" && ACTIVE_STATUSES.has(status);
 
   return { userId, companyId: membership.company_id, plan, status, entitled };
 }
