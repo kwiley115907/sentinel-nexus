@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requireEntitledUser } from "@/lib/requireEntitlement";
 
 const Schema = z.object({
   question: z.string().min(3).max(2000),
@@ -9,6 +10,9 @@ const Schema = z.object({
 });
 
 export async function POST(request: Request) {
+  const denied = await requireEntitledUser();
+  if (denied) return denied;
+
   const parsed = Schema.safeParse(await request.json());
 
   if (!parsed.success) {

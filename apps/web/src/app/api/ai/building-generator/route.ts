@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { requireEntitledUser } from "@/lib/requireEntitlement";
 
 const Schema = z.object({
   prompt: z.string().min(5).max(3000),
 });
 
 export async function POST(request: Request) {
+  const denied = await requireEntitledUser();
+  if (denied) return denied;
+
   try {
     const parsed = Schema.safeParse(await request.json());
 

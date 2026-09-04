@@ -1,8 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireEntitledUser } from "@/lib/requireEntitlement";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const denied = await requireEntitledUser();
+  if (denied) return denied;
+
   try {
     const aiUrl =
       process.env.SENTINEL_AI_URL?.replace(/\/+$/, "");
