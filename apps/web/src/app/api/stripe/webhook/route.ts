@@ -32,7 +32,17 @@ async function upsertSubscription(
   companyId: string,
   subscription: Stripe.Subscription
 ) {
-  const priceId = subscription.items.data[0]?.price?.id;
+  const item = subscription.items.data[0];
+  const priceId = item?.price?.id;
+
+  // As of newer Stripe API versions, current_period_end lives on the
+  // subscription ITEM, not the subscription itself - the field was removed
+  // from the top-level object. Falling back to the (possibly absent)
+  // top-level field keeps this working against older API versions too.
+  const periodEndUnix =
+    item?.current_period_end ??
+    (subscription as unknown as { current_period_end?: number })
+      .current_period_end;
 
   const { error } = await supabaseAdmin.from("subscriptions").upsert(
     {
@@ -41,9 +51,9 @@ async function upsertSubscription(
       stripe_subscription_id: subscription.id,
       plan: planFromPriceId(priceId),
       status: mapStripeStatus(subscription.status),
-      current_period_end: new Date(
-        subscription.current_period_end * 1000
-      ).toISOString(),
+      current_period_end: periodEndUnix
+        ? new Date(periodEndUnix * 1000).toISOString()
+        : null,
       cancel_at_period_end: subscription.cancel_at_period_end,
     },
     { onConflict: "company_id" }

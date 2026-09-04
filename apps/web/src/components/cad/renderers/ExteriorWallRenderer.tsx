@@ -10,6 +10,8 @@ export type ExteriorWallFootprint = {
   maxZ: number;
   height: number;
   stories: number;
+  showRoof?: boolean;
+  hideWalls?: boolean;
 };
 
 function formatFeetInches(value: number) {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireEntitledUser } from "@/lib/requireEntitlement";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,6 +24,9 @@ type GatewayResponse = {
 };
 
 export async function POST(request: NextRequest) {
+  const denied = await requireEntitledUser();
+  if (denied) return denied;
+
   try {
     const body = (await request.json()) as ChatRequest;
 

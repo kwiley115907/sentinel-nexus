@@ -1,12 +1,16 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { rateLimit } from "@/lib/rateLimit";
+import { requireEntitledUser } from "@/lib/requireEntitlement";
 
 const RequestSchema = z.object({
   prompt: z.string().min(3).max(1200),
 });
 
 export async function POST(request: Request) {
+  const denied = await requireEntitledUser();
+  if (denied) return denied;
+
   const ip = request.headers.get("x-forwarded-for") || "local";
   const limited = rateLimit(`ai:${ip}`, 5, 60_000);
 

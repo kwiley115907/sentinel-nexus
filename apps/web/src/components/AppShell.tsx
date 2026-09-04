@@ -126,6 +126,13 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           window.location.href = "/login";
           return;
         }
+
+        if (data.session) {
+          // Self-heals the company/subscription bootstrap for accounts
+          // that have never had a company created for them - safe to call
+          // on every load, it's a no-op once the company already exists.
+          await supabase.rpc("ensure_company_for_current_user");
+        }
       } finally {
         setAuthReady(true);
       }

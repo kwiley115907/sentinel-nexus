@@ -1,18 +1,13 @@
 "use client";
 
 import { useState } from "react";
-
-const PAYPAL_PRO_URL = "PASTE_PAYPAL_PRO_LINK_HERE";
-const PAYPAL_PREMIUM_URL = "PASTE_PAYPAL_PREMIUM_LINK_HERE";
-const CASHAPP_URL = "https://cash.app/$lktree2026";
+import { supabase } from "@/lib/supabase";
 
 const plans = [
   {
     name: "Basic",
     price: "$0",
     period: "starter",
-    href: "/signup",
-    button: "Start Free",
     features: [
       "Basic blueprint viewing",
       "Limited device placement",
@@ -25,7 +20,7 @@ const plans = [
     name: "Pro",
     price: "$49.99/mo.",
     period: "14-day free trial",
-    href: PAYPAL_PRO_URL,
+    checkoutPlan: "monthly" as const,
     button: "Start Pro",
     featured: true,
     features: [
@@ -44,7 +39,7 @@ const plans = [
     name: "Premium",
     price: "$399/yr.",
     period: "14-day free trial",
-    href: PAYPAL_PREMIUM_URL,
+    checkoutPlan: "annual" as const,
     button: "Start Premium",
     features: [
       "Everything in Pro",
@@ -61,25 +56,40 @@ const plans = [
 ];
 
 export default function PricingPage() {
-  const [promo, setPromo] = useState("");
-  const [status, setStatus] = useState("");
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [error, setError] = useState("");
 
-  function applyPromo() {
-    const code = promo.trim().toUpperCase();
-    const validCodes = ["FREECLIENT", "WAIVE100", "COMPED", "BETA2026"];
+  async function startCheckout(checkoutPlan: "monthly" | "annual") {
+    setError("");
+    setLoadingPlan(checkoutPlan);
 
-    if (!validCodes.includes(code)) {
-      setStatus("Invalid promo code.");
-      return;
+    try {
+      const { data } = await supabase.auth.getSession();
+
+      if (!data.session) {
+        window.location.href = `/signup?next=pricing`;
+        return;
+      }
+
+      const response = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan: checkoutPlan }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.url) {
+        setError(result.error || "Could not start checkout. Please try again.");
+        setLoadingPlan(null);
+        return;
+      }
+
+      window.location.href = result.url;
+    } catch {
+      setError("Could not start checkout. Please try again.");
+      setLoadingPlan(null);
     }
-
-    localStorage.setItem("sentinel-nexus-subscription", "waived");
-    localStorage.setItem("sentinel-nexus-promo-code", code);
-    setStatus("Promo accepted. Subscription waived.");
-
-    setTimeout(() => {
-      window.location.href = "/dashboard";
-    }, 1000);
   }
 
   return (
@@ -105,6 +115,12 @@ export default function PricingPage() {
           <p className="mx-auto mt-5 max-w-3xl text-lg text-yellow-100/80">
             Blueprint building, device layouts, wire runs, AI reports, inspections, and as-built workflows built for fire alarm, CCTV, security, and access control.
           </p>
+
+          {error && (
+            <p className="mx-auto mt-6 max-w-xl rounded-xl bg-red-950/60 p-3 text-red-300">
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="mt-12 grid gap-6 lg:grid-cols-3">
@@ -137,12 +153,23 @@ export default function PricingPage() {
                 {plan.period}
               </p>
 
-              <a
-                href={plan.href}
-                className="mt-8 block rounded-2xl bg-yellow-400 p-4 text-center text-lg font-black text-black hover:bg-yellow-300"
-              >
-                {plan.button}
-              </a>
+              {plan.checkoutPlan ? (
+                <button
+                  type="button"
+                  disabled={loadingPlan !== null}
+                  onClick={() => startCheckout(plan.checkoutPlan)}
+                  className="mt-8 block w-full rounded-2xl bg-yellow-400 p-4 text-center text-lg font-black text-black hover:bg-yellow-300 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loadingPlan === plan.checkoutPlan ? "Redirecting to checkout..." : plan.button}
+                </button>
+              ) : (
+                <a
+                  href="/signup"
+                  className="mt-8 block rounded-2xl bg-yellow-400 p-4 text-center text-lg font-black text-black hover:bg-yellow-300"
+                >
+                  Start Free
+                </a>
+              )}
 
               <ul className="mt-8 space-y-3 text-yellow-50/90">
                 {plan.features.map((feature) => (
@@ -154,43 +181,6 @@ export default function PricingPage() {
               </ul>
             </div>
           ))}
-        </div>
-
-        <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <div className="rounded-[2rem] border border-green-400/30 bg-black/10 p-8 backdrop-blur-sm">
-            <h2 className="text-3xl font-black text-green-300">Cash App</h2>
-            <p className="mt-3 text-yellow-100/80">
-              Pay manually with Cash App. Access will be approved after payment verification.
-            </p>
-
-            <a
-              href={CASHAPP_URL}
-              className="mt-6 block rounded-2xl bg-green-500 p-4 text-center font-black text-black hover:bg-green-400"
-            >
-              Pay With Cash App
-            </a>
-          </div>
-
-          <div className="rounded-[2rem] border border-yellow-400/30 bg-black/10 p-8 backdrop-blur-sm">
-            <h2 className="text-3xl font-black text-yellow-300">Promo Code</h2>
-
-            <input
-              value={promo}
-              onChange={(event) => setPromo(event.target.value)}
-              placeholder="Enter promo code"
-              className="mt-5 w-full rounded-xl bg-black/20 p-4 text-white"
-            />
-
-            <button
-              type="button"
-              onClick={applyPromo}
-              className="mt-4 w-full rounded-xl bg-yellow-400 p-4 font-black text-black hover:bg-yellow-300"
-            >
-              Apply Promo Code
-            </button>
-
-            {status && <p className="mt-4 text-yellow-300">{status}</p>}
-          </div>
         </div>
       </section>
     </main>
