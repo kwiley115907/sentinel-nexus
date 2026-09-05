@@ -40,39 +40,62 @@ function Posts({ length, height, radius, color }: { length: number; height: numb
 }
 
 function ChainLinkPanel({ length, height }: { length: number; height: number }) {
-  const rows = Math.max(2, Math.round(height * 2));
-  const cols = Math.max(2, Math.round(length * 2));
+  // Real chain link is a diamond weave, not a square grid - draw two
+  // families of diagonal lines (45 degrees each way) clipped to the
+  // panel rectangle, plus top/bottom rails, instead of the old
+  // straight horizontal/vertical crosshatch that read as a plain screen.
+  const spacing = 0.3;
 
   return (
     <group>
       <mesh position={[0, height / 2, 0]}>
         <planeGeometry args={[length, height]} />
-        <meshStandardMaterial color="#9ca3af" roughness={0.9} transparent opacity={0.28} side={THREE.DoubleSide} />
+        <meshStandardMaterial color="#c7ccd1" roughness={0.8} metalness={0.2} transparent opacity={0.12} side={THREE.DoubleSide} />
       </mesh>
-
-      <lineSegments position={[0, height / 2, 0]}>
-        <edgesGeometry args={[new THREE.PlaneGeometry(length, height)]} />
-        <lineBasicMaterial color="#6b7280" />
-      </lineSegments>
 
       <line>
         <bufferGeometry
           attach="geometry"
           onUpdate={(g: any) => {
             const pts: THREE.Vector3[] = [];
-            for (let i = 0; i <= cols; i++) {
-              const x = -length / 2 + (length * i) / cols;
-              pts.push(new THREE.Vector3(x, 0, 0), new THREE.Vector3(x, height, 0));
+
+            for (let k = -height; k <= length; k += spacing) {
+              const x0 = Math.max(0, k);
+              const x1 = Math.min(length, height + k);
+              if (x1 > x0) {
+                pts.push(
+                  new THREE.Vector3(x0 - length / 2, x0 - k, 0),
+                  new THREE.Vector3(x1 - length / 2, x1 - k, 0),
+                );
+              }
             }
-            for (let j = 0; j <= rows; j++) {
-              const y = (height * j) / rows;
-              pts.push(new THREE.Vector3(-length / 2, y, 0), new THREE.Vector3(length / 2, y, 0));
+
+            for (let k = 0; k <= length + height; k += spacing) {
+              const x0 = Math.max(0, k - height);
+              const x1 = Math.min(length, k);
+              if (x1 > x0) {
+                pts.push(
+                  new THREE.Vector3(x0 - length / 2, k - x0, 0),
+                  new THREE.Vector3(x1 - length / 2, k - x1, 0),
+                );
+              }
             }
+
             g.setFromPoints(pts);
           }}
         />
-        <lineBasicMaterial color="#94a3b8" transparent opacity={0.5} />
+        <lineBasicMaterial color="#8b93a1" transparent opacity={0.85} />
       </line>
+
+      <mesh position={[0, height, 0]}>
+        <boxGeometry args={[length, 0.04, 0.04]} />
+        <meshStandardMaterial color="#71717a" roughness={0.5} metalness={0.3} />
+      </mesh>
+
+      <mesh position={[0, 0.02, 0]}>
+        <boxGeometry args={[length, 0.04, 0.04]} />
+        <meshStandardMaterial color="#71717a" roughness={0.5} metalness={0.3} />
+      </mesh>
     </group>
   );
 }
@@ -141,10 +164,14 @@ export default function FenceRenderer({
   fence,
   selected = false,
   onSelect,
+  onDragStart,
+  placementActive,
 }: {
   fence: Fence3D;
   selected?: boolean;
   onSelect?: () => void;
+  onDragStart?: () => void;
+  placementActive?: boolean;
 }) {
   const length = fence.length ?? 4;
   const height = fence.height ?? (fence.isGate ? 1.5 : 1.8);
@@ -163,8 +190,15 @@ export default function FenceRenderer({
       position={[fence.x, floorOffset, fence.z]}
       rotation={[0, rotation, 0]}
       onClick={(event) => {
+        if (placementActive) return;
         event.stopPropagation();
         onSelect?.();
+      }}
+      onPointerDown={(event) => {
+        if (placementActive) return;
+        event.stopPropagation();
+        onSelect?.();
+        onDragStart?.();
       }}
     >
       <Posts length={length} height={height} radius={fence.isGate ? 0.04 : 0.03} color={postColor} />

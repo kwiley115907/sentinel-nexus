@@ -86,7 +86,7 @@ type FenceItem = {
   id: string; x: number; z: number; layer: Layer; length?: number; height?: number; rotation?: number;
   type?: FenceType; isGate?: boolean; floor?: number; label?: string;
 };
-type PlantType = "TREE" | "SHRUB" | "FLOWER";
+type PlantType = "TREE" | "SHRUB" | "FLOWER" | "GRASS";
 type PlantItem = { id: string; x: number; z: number; layer: Layer; type?: PlantType; scale?: number; floor?: number; label?: string };
 
 type BuildingBlock = {
@@ -150,6 +150,64 @@ function snap(value: number) {
 
 function pointFromEvent(event: ThreeEvent<PointerEvent>): Vec2 {
   return { x: snap(event.point.x), z: snap(event.point.z) };
+}
+
+// Doors/windows were previously dropped at the raw click point with no
+// rotation and no relation to any specific wall - meaning most ended up
+// embedded somewhere inside a solid wall's thickness (or floating well
+// away from any wall entirely) rather than sitting flush on a wall face.
+// Since walls are opaque, an embedded door/window was only visible when
+// its containing wall happened to be selected (and briefly more
+// transparent). Finds the nearest wall segment to a click point and
+// returns where a door/window should actually sit: the closest point on
+// that wall's centerline, which side of the wall the click was nearer
+// to (so it mounts on whichever face the user clicked), and the wall's
+// own angle so the object's rotation lines up with it.
+function nearestWallPlacement(
+  point: Vec2,
+  wallList: Array<{ start: Vec2; end: Vec2; thickness?: number }>,
+): { x: number; z: number; rotation: number; dist: number; nx: number; nz: number; thickness: number } | null {
+  let best: { x: number; z: number; rotation: number; dist: number; nx: number; nz: number; thickness: number } | null = null;
+
+  for (const wall of wallList) {
+    const dx = wall.end.x - wall.start.x;
+    const dz = wall.end.z - wall.start.z;
+    const lenSq = dx * dx + dz * dz;
+    if (lenSq < 1e-6) continue;
+
+    let t = ((point.x - wall.start.x) * dx + (point.z - wall.start.z) * dz) / lenSq;
+    t = Math.max(0.05, Math.min(0.95, t));
+    const px = wall.start.x + dx * t;
+    const pz = wall.start.z + dz * t;
+    const dist = Math.hypot(point.x - px, point.z - pz);
+
+    if (!best || dist < best.dist) {
+      const len = Math.sqrt(lenSq);
+      const nx = -dz / len;
+      const nz = dx / len;
+      const side = (point.x - px) * nx + (point.z - pz) * nz >= 0 ? 1 : -1;
+      const angle = Math.atan2(dz, dx);
+      best = { x: px, z: pz, rotation: -angle, dist, nx: nx * side, nz: nz * side, thickness: wall.thickness ?? 0.15 };
+    }
+  }
+
+  return best;
+}
+
+function snapToWallFace(point: Vec2, wallList: Array<{ start: Vec2; end: Vec2; thickness?: number }>, objectThickness: number) {
+  const hit = nearestWallPlacement(point, wallList);
+  const SNAP_RADIUS = 3;
+
+  if (!hit || hit.dist > SNAP_RADIUS) {
+    return { x: point.x, z: point.z, rotation: 0 };
+  }
+
+  const offset = hit.thickness / 2 + objectThickness / 2 + 0.03;
+  return {
+    x: hit.x + hit.nx * offset,
+    z: hit.z + hit.nz * offset,
+    rotation: hit.rotation,
+  };
 }
 
 
@@ -216,6 +274,9 @@ export default function Blueprint3DPage() {
     function handleCadKeyboard(event: KeyboardEvent) {
       if (event.key === "Escape") {
         deselectAll();
+        setCommand("SELECT");
+        setPendingDeviceLabel("");
+        setWallStart(null);
       }
 
       if (event.key === "Delete" || event.key === "Backspace") {
@@ -268,20 +329,12 @@ export default function Blueprint3DPage() {
   // Every room automatically gets 4 walls around its perimeter (no more
   // rooms rendering as bare floor slabs), classified as exterior (using
   // the chosen siding for that side) or interior (using the chosen
-  // finish) based on whether they sit on the outer boundary of the
-  // combined footprint of every room. Manually-drawn walls get the same
-  // treatment layered on top.
+  // finish) based on whether open air actually exists on that wall's
+  // outward side - not just whether it touches the overall bounding
+  // rectangle, which breaks for L-shaped/multi-wing buildings. Manually
+  // drawn walls get the same treatment layered on top.
   const renderWalls = useMemo(() => {
     const realRooms = rooms.filter((room) => room.kind !== "SHELL");
-    const footprint =
-      realRooms.length > 0
-        ? {
-            minX: Math.min(...realRooms.map((room) => room.x - room.width / 2)),
-            maxX: Math.max(...realRooms.map((room) => room.x + room.width / 2)),
-            minZ: Math.min(...realRooms.map((room) => room.z - room.depth / 2)),
-            maxZ: Math.max(...realRooms.map((room) => room.z + room.depth / 2)),
-          }
-        : null;
 
     const autoWalls = dedupeSharedWalls(
       generateInteriorWallsFromRooms(realRooms).map((wall) => ({
@@ -291,8 +344,8 @@ export default function Blueprint3DPage() {
     );
 
     return [
-      ...classifyWalls(autoWalls, footprint, exteriorMaterials, interiorFinish),
-      ...classifyWalls(walls, footprint, exteriorMaterials, interiorFinish),
+      ...classifyWalls(autoWalls, realRooms, exteriorMaterials, interiorFinish),
+      ...classifyWalls(walls, realRooms, exteriorMaterials, interiorFinish),
     ];
   }, [rooms, walls, exteriorMaterials, interiorFinish]);
 
@@ -556,9 +609,20 @@ export default function Blueprint3DPage() {
   // Kept in sync with the commands handleCanvasClick actually places on.
   const PLACEMENT_COMMANDS = new Set<CadCommand>([
     "LINE", "POLYLINE", "RECTANGLE", "ROOM_LABEL", "BLOCKS", "TEXT", "STAIRS",
-    "FENCE", "GATE", "TREE", "SHRUB", "FLOWER",
+    "FENCE", "GATE", "TREE", "SHRUB", "FLOWER", "GRASS",
     "SMOKE", "HEAT", "PULL", "HORN_STROBE", "CAMERA", "CARD_READER", "REX", "DOOR_CONTACT",
   ]);
+  // Single-click placement tools (room, door, window, stair, fence/gate,
+  // landscaping, devices) used to stay active forever once picked - every
+  // further click anywhere on the canvas stamped down another copy, with
+  // no way to get back to Select mode short of picking a *different* tool
+  // (which just started stamping that one instead). Each of their branches
+  // below now calls setCommand("SELECT") right after placing its one
+  // object, snapping back to Select automatically - matching how every
+  // other CAD tool behaves: click once, get one object, and you're back to
+  // picking/moving things until you deliberately choose a placement tool
+  // again. Wall drawing (LINE/POLYLINE) is the one exception left
+  // continuous, since a wall chain naturally spans several clicks.
   const placementActive =
     measureMode || Boolean(pendingDeviceLabel) || PLACEMENT_COMMANDS.has(command);
 
@@ -594,6 +658,7 @@ export default function Blueprint3DPage() {
         },
       ]);
       setStatus(`${pendingDeviceLabel} placed on floor ${currentFloor}.`);
+      setPendingDeviceLabel("");
       return;
     }
 
@@ -616,18 +681,29 @@ export default function Blueprint3DPage() {
         { id: makeId(), label: `Building ${current.length + 1}`, x: point.x, z: point.z, width: 5, depth: 4, height: 2.8, stories: 1, shape: "RECTANGLE", layer: "ARCHITECTURE" },
       ]);
       setStatus("Room created.");
+      setCommand("SELECT");
       return;
     }
 
     if (command === "BLOCKS") {
-      setDoors((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: currentFloor, layer: "ARCHITECTURE" }]);
+      const snapped = snapToWallFace(point, renderWalls, 0.15);
+      setDoors((current) => [
+        ...current,
+        { id: makeId(), x: snapped.x, z: snapped.z, rotation: snapped.rotation, floor: currentFloor, layer: "ARCHITECTURE" },
+      ]);
       setStatus(`Door placed on floor ${currentFloor}.`);
+      setCommand("SELECT");
       return;
     }
 
     if (command === "TEXT") {
-      setWindows((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: currentFloor, layer: "ARCHITECTURE" }]);
+      const snapped = snapToWallFace(point, renderWalls, 0.12);
+      setWindows((current) => [
+        ...current,
+        { id: makeId(), x: snapped.x, z: snapped.z, rotation: snapped.rotation, floor: currentFloor, layer: "ARCHITECTURE" },
+      ]);
       setStatus(`Window placed on floor ${currentFloor}.`);
+      setCommand("SELECT");
       return;
     }
 
@@ -638,6 +714,7 @@ export default function Blueprint3DPage() {
           ? `Stair placed on floor ${currentFloor}.`
           : `Stair placed on floor ${currentFloor}. It won't be visible until the building has more than one story.`
       );
+      setCommand("SELECT");
       return;
     }
 
@@ -647,12 +724,14 @@ export default function Blueprint3DPage() {
         { id: makeId(), x: point.x, z: point.z, floor: 1, layer: "ARCHITECTURE", type: "CHAIN_LINK", isGate: command === "GATE", length: 4, rotation: 0 },
       ]);
       setStatus(`${command === "GATE" ? "Gate" : "Fence"} placed. Pick it to change its type or make it a gate.`);
+      setCommand("SELECT");
       return;
     }
 
-    if (command === "TREE" || command === "SHRUB" || command === "FLOWER") {
+    if (command === "TREE" || command === "SHRUB" || command === "FLOWER" || command === "GRASS") {
       setPlants((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: 1, layer: "ARCHITECTURE", type: command, scale: 1 }]);
       setStatus(`${command.charAt(0)}${command.slice(1).toLowerCase()} placed.`);
+      setCommand("SELECT");
       return;
     }
 
@@ -671,6 +750,7 @@ export default function Blueprint3DPage() {
     if (selectedDeviceTool) {
       setDevices((current) => [...current, { id: makeId(), label: selectedDeviceTool.label, x: point.x, z: point.z, floor: currentFloor, layer: selectedDeviceTool.layer }]);
       setStatus(`${selectedDeviceTool.label} placed on floor ${currentFloor}.`);
+      setCommand("SELECT");
     }
   }
 

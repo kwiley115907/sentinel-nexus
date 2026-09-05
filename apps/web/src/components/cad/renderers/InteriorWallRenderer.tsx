@@ -203,39 +203,66 @@ export function dedupeSharedWalls(walls: InteriorWall3D[]): InteriorWall3D[] {
 /**
  * Tags each auto-generated perimeter wall as exterior (with the chosen
  * siding/stucco/brick for that side of the building) or interior (with
- * the chosen sheetrock/tile finish), based on whether it sits on the
- * outer boundary of the combined footprint of every room.
+ * the chosen sheetrock/tile finish).
+ *
+ * Previously this only flagged a wall exterior when it touched the
+ * overall rectangular bounding box of every room combined - correct for
+ * a single rectangular building, but wrong for any L-shaped, corridor
+ * + wings, or otherwise non-rectangular layout (exactly what the AI
+ * building generator produces): most of the genuinely outward-facing
+ * walls on a shape like that never touch the bounding rectangle's four
+ * straight edges, so they fell through to the "interior" branch and got
+ * painted with the near-white sheetrock finish - which is what read as
+ * "plain white sheet, no stucco/brick applied" even though the exterior
+ * material picker was working correctly the whole time.
+ *
+ * Instead, probe a small distance out from each wall's own outward side
+ * (using its `side` - NORTH/SOUTH/EAST/WEST - which already records
+ * which way it faces relative to the room it was generated from) and
+ * check whether that point falls inside any room at all. If nothing is
+ * there, the wall genuinely faces open air and is exterior, regardless
+ * of where it sits relative to the building's overall bounding box.
  */
 export function classifyWalls(
   walls: InteriorWall3D[],
-  footprint: { minX: number; maxX: number; minZ: number; maxZ: number } | null,
+  rooms: Array<{ x: number; z: number; width: number; depth: number }>,
   exteriorMaterials: Record<WallSide, ExteriorMaterial>,
   interiorFinish: InteriorFinish,
 ): InteriorWall3D[] {
-  const EPSILON = 0.01;
+  const MARGIN = 0.05;
+  const PROBE = 0.4;
+
+  function isInsideAnyRoom(x: number, z: number) {
+    return rooms.some(
+      (room) =>
+        x > room.x - room.width / 2 + MARGIN &&
+        x < room.x + room.width / 2 - MARGIN &&
+        z > room.z - room.depth / 2 + MARGIN &&
+        z < room.z + room.depth / 2 - MARGIN,
+    );
+  }
 
   return walls.map((wall) => {
-    if (!footprint) {
+    if (!wall.side) {
       return { ...wall, finish: wall.finish ?? interiorFinish };
     }
 
-    const onNorth = wall.side === "NORTH" && Math.abs(wall.start.z - footprint.minZ) < EPSILON;
-    const onSouth = wall.side === "SOUTH" && Math.abs(wall.start.z - footprint.maxZ) < EPSILON;
-    const onWest = wall.side === "WEST" && Math.abs(wall.start.x - footprint.minX) < EPSILON;
-    const onEast = wall.side === "EAST" && Math.abs(wall.start.x - footprint.maxX) < EPSILON;
+    const midX = (wall.start.x + wall.end.x) / 2;
+    const midZ = (wall.start.z + wall.end.z) / 2;
 
-    const exteriorSide: WallSide | null = onNorth
-      ? "NORTH"
-      : onSouth
-        ? "SOUTH"
-        : onWest
-          ? "WEST"
-          : onEast
-            ? "EAST"
-            : null;
+    const [testX, testZ] =
+      wall.side === "NORTH"
+        ? [midX, midZ - PROBE]
+        : wall.side === "SOUTH"
+          ? [midX, midZ + PROBE]
+          : wall.side === "WEST"
+            ? [midX - PROBE, midZ]
+            : [midX + PROBE, midZ];
 
-    if (exteriorSide) {
-      return { ...wall, exteriorMaterial: exteriorMaterials[exteriorSide], finish: undefined };
+    const facesOpenAir = !isInsideAnyRoom(testX, testZ);
+
+    if (facesOpenAir) {
+      return { ...wall, exteriorMaterial: exteriorMaterials[wall.side], finish: undefined };
     }
 
     return { ...wall, exteriorMaterial: undefined, finish: wall.finish ?? interiorFinish };

@@ -117,7 +117,13 @@ export default function CadScene({
       )}
 
       {visibleWalls.filter((wall: any) => visibleLayers[wall.layer]).map((wall: any) => (
-        <InteriorWallRenderer key={wall.id} wall={wall} selected={selectedId === wall.id} onSelect={() => setSelectedId(wall.id)} />
+        <InteriorWallRenderer
+          key={wall.id}
+          wall={wall}
+          selected={selectedId === wall.id}
+          showLabel={selectedId === wall.id}
+          onSelect={() => setSelectedId(wall.id)}
+        />
       ))}
 
       {viewMode !== "EXTERIOR" && rooms.filter((room: any) => visibleLayers[room.layer]).map((room: any) => (
@@ -149,7 +155,9 @@ export default function CadScene({
           key={door.id}
           door={{ storyHeight: typicalStoryHeight, ...door }}
           selected={selectedId === door.id}
+          placementActive={placementActive}
           onSelect={() => setSelectedId(door.id)}
+          onDragStart={() => setDraggingId(door.id)}
         />
       ))}
 
@@ -158,7 +166,9 @@ export default function CadScene({
           key={windowItem.id}
           windowItem={{ storyHeight: typicalStoryHeight, ...windowItem }}
           selected={selectedId === windowItem.id}
+          placementActive={placementActive}
           onSelect={() => setSelectedId(windowItem.id)}
+          onDragStart={() => setDraggingId(windowItem.id)}
         />
       ))}
 
@@ -180,7 +190,9 @@ export default function CadScene({
           key={fence.id}
           fence={{ storyHeight: typicalStoryHeight, ...fence }}
           selected={selectedId === fence.id}
+          placementActive={placementActive}
           onSelect={() => setSelectedId(fence.id)}
+          onDragStart={() => setDraggingId(fence.id)}
         />
       ))}
 
@@ -189,7 +201,9 @@ export default function CadScene({
           key={plant.id}
           plant={{ storyHeight: typicalStoryHeight, ...plant }}
           selected={selectedId === plant.id}
+          placementActive={placementActive}
           onSelect={() => setSelectedId(plant.id)}
+          onDragStart={() => setDraggingId(plant.id)}
         />
       ))}
 
@@ -207,7 +221,9 @@ export default function CadScene({
           key={device.id}
           device={device}
           selected={selectedId === device.id || wireStartId === device.id}
+          placementActive={placementActive}
           onSelect={() => handleDeviceSelect(device)}
+          onDragStart={() => setDraggingId(device.id)}
         />
       ))}
 

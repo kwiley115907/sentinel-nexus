@@ -1,6 +1,6 @@
 "use client";
 
-import { Home, Minus, DoorOpen, Square, TrendingUp, Zap, Ruler, Trash2, Triangle, Trees, Flower2, Shrub, Fence, DoorClosed, Columns2 } from "lucide-react";
+import { Home, Minus, DoorOpen, Square, TrendingUp, Zap, Ruler, Trash2, Triangle, Trees, Flower2, Shrub, Fence, DoorClosed, Columns2, Sprout } from "lucide-react";
 import type { CadCommand } from "@/components/cad/CadRibbon";
 
 export default function CadObjectRail({
@@ -33,6 +33,7 @@ export default function CadObjectRail({
     { label: "Tree", icon: Trees, onClick: () => onCommand("TREE") },
     { label: "Shrub", icon: Shrub, onClick: () => onCommand("SHRUB") },
     { label: "Flowers", icon: Flower2, onClick: () => onCommand("FLOWER") },
+    { label: "Grass", icon: Sprout, onClick: () => onCommand("GRASS") },
   ];
 
   return (

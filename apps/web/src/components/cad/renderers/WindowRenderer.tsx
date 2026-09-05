@@ -24,10 +24,14 @@ export default function WindowRenderer({
   windowItem,
   selected = false,
   onSelect,
+  onDragStart,
+  placementActive,
 }: {
   windowItem: Window3D;
   selected?: boolean;
   onSelect?: () => void;
+  onDragStart?: () => void;
+  placementActive?: boolean;
 }) {
   // A manually-placed window previously defaulted to a sill at 3 units
   // plus 3 units of height - spanning from y=3 to y=6 against rooms
@@ -48,8 +52,15 @@ export default function WindowRenderer({
       position={[windowItem.x, y, windowItem.z]}
       rotation={[0, rotation, 0]}
       onClick={(event) => {
+        if (placementActive) return;
         event.stopPropagation();
         onSelect?.();
+      }}
+      onPointerDown={(event) => {
+        if (placementActive) return;
+        event.stopPropagation();
+        onSelect?.();
+        onDragStart?.();
       }}
     >
       <mesh>

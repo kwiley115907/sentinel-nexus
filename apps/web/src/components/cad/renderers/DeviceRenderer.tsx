@@ -40,10 +40,14 @@ export default function DeviceRenderer({
   device,
   selected = false,
   onSelect,
+  onDragStart,
+  placementActive,
 }: {
   device: Device3D;
   selected?: boolean;
   onSelect?: () => void;
+  onDragStart?: () => void;
+  placementActive?: boolean;
 }) {
   const storyHeight = device.storyHeight ?? 10;
   const floor = Math.max(1, device.floor ?? 1);
@@ -55,8 +59,15 @@ export default function DeviceRenderer({
       position={[device.x, y, device.z]}
       rotation={[0, device.rotation ?? 0, 0]}
       onClick={(event) => {
+        if (placementActive) return;
         event.stopPropagation();
         onSelect?.();
+      }}
+      onPointerDown={(event) => {
+        if (placementActive) return;
+        event.stopPropagation();
+        onSelect?.();
+        onDragStart?.();
       }}
     >
       <mesh>

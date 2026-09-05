@@ -33,10 +33,14 @@ export default function DoorRenderer({
   door,
   selected=false,
   onSelect,
+  onDragStart,
+  placementActive,
 }:{
   door:Door3D;
   selected?:boolean;
   onSelect?:()=>void;
+  onDragStart?:()=>void;
+  placementActive?:boolean;
 }){
 
   // A manually-placed door previously defaulted to 3 units wide by 7
@@ -62,8 +66,15 @@ export default function DoorRenderer({
       position={[door.x,floorOffset,door.z]}
       rotation={[0,angle,0]}
       onClick={(e)=>{
+        if (placementActive) return;
         e.stopPropagation();
         onSelect?.();
+      }}
+      onPointerDown={(e)=>{
+        if (placementActive) return;
+        e.stopPropagation();
+        onSelect?.();
+        onDragStart?.();
       }}
     >
 
