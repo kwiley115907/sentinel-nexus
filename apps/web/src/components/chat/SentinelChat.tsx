@@ -7,6 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { useRouter } from "next/navigation";
+import { convertAiBlueprintToCad } from "@/components/cad/importers/AiImporter";
+import {
+  recallLastDevices,
+  rememberLastDevices,
+  stashPendingBuilding,
+  stashWireRunProject,
+} from "@/lib/aiHandoff";
 
 type ChatMessage = {
   id: string;
@@ -58,11 +66,38 @@ function extractReply(result: ApiResponse): string {
   );
 }
 
+type ChatIntent = "BUILD_BUILDING" | "BUILD_WIRE_RUN" | "CHAT";
+
+// The chat is meant to work from anywhere (it's in the sidebar on every
+// page), not just while already inside the 3D Builder - so a request to
+// build something or wire something up is detected here and handed off to
+// the tool that actually does it (see @/lib/aiHandoff), rather than only
+// answering conversationally. Anything that doesn't match either pattern
+// falls through to the normal chat API unchanged.
+function detectIntent(prompt: string): ChatIntent {
+  const text = prompt.toLowerCase();
+
+  const wireRunTerm = /\b(wire|wiring|slc|nac|circuit|cable)\b/;
+  const wireRunAction = /\b(wire up|hook up|connect|run wire|wire run)\b/;
+  if (wireRunTerm.test(text) && wireRunAction.test(text)) {
+    return "BUILD_WIRE_RUN";
+  }
+
+  const buildingAction = /\b(build|design|create|generate|make me|draw)\b/;
+  const buildingNoun = /\b(building|school|hospital|office|warehouse|house|apartment|hotel|restaurant|stor(y|ies)|floor plan|blueprint)\b/;
+  if (buildingAction.test(text) && buildingNoun.test(text)) {
+    return "BUILD_BUILDING";
+  }
+
+  return "CHAT";
+}
+
 export default function SentinelChat() {
+  const router = useRouter();
   const [messages, setMessages] = useState<ChatMessage[]>([
     createMessage(
       "assistant",
-      "Hello. I am Sentinel Nexus. How can I assist you?",
+      "Hello. I am Sentinel Nexus. Ask me a question, tell me to build a building (e.g. \"build a 2 story school\"), or ask me to wire one up once it's built.",
     ),
   ]);
 
@@ -99,6 +134,59 @@ export default function SentinelChat() {
 
     setMessages((current) => [...current, userMessage]);
     setInput("");
+
+    const intent = detectIntent(prompt);
+
+    if (intent === "BUILD_BUILDING") {
+      setIsSending(true);
+
+      const model = convertAiBlueprintToCad({ prompt });
+      stashPendingBuilding(model, prompt);
+      rememberLastDevices(model.devices);
+
+      setMessages((current) => [
+        ...current,
+        createMessage(
+          "assistant",
+          `Building it now - opening the 3D Builder with ${model.rooms.length} room(s), ${model.doors.length} door(s), and ${model.devices.length} fire alarm device(s). You can keep editing it there, or come back here for more.`,
+        ),
+      ]);
+
+      setTimeout(() => router.push("/blueprint-3d"), 700);
+      setIsSending(false);
+      return;
+    }
+
+    if (intent === "BUILD_WIRE_RUN") {
+      const devices = recallLastDevices();
+
+      if (!devices || devices.length === 0) {
+        setMessages((current) => [
+          ...current,
+          createMessage(
+            "assistant",
+            "I don't have a building to wire yet - ask me to build one first (for example \"build a 2 story school\"), then ask me to wire it up.",
+          ),
+        ]);
+        return;
+      }
+
+      setIsSending(true);
+      const runCount = stashWireRunProject(devices);
+
+      setMessages((current) => [
+        ...current,
+        createMessage(
+          "assistant",
+          `Wired it up - created ${runCount} run(s), devices of the same type chained together on one loop. Opening Wire Runs...`,
+        ),
+      ]);
+
+      setTimeout(() => router.push("/wire-runs"), 700);
+      setIsSending(false);
+      return;
+    }
+
     setIsSending(true);
 
     try {
