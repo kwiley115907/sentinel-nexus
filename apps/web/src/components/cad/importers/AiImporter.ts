@@ -42,6 +42,54 @@ function room(id: string, label: string, x: number, z: number, width: number, de
   };
 }
 
+// A mall's own room count/layout is parametric (however many stores were
+// asked for), not one fixed floor plan - generated separately below and
+// spliced in before the fixed-layout templates run.
+function mallProgram(prompt: string, stories: number): CadRoom[] {
+  const t = prompt.toLowerCase();
+
+  const perFloorMatch = t.match(/(\d+)\s*stores?\s*(?:per|\/|each)\s*floor/);
+  const totalMatch = t.match(/(\d+)\s*stores?\b/);
+
+  const totalStores = totalMatch ? Math.max(1, Number(totalMatch[1])) : stories * 10;
+  const storesPerFloor = perFloorMatch
+    ? Math.max(1, Number(perFloorMatch[1]))
+    : Math.max(1, Math.round(totalStores / stories));
+
+  const hasRestroomPerStore = /restroom|bathroom|toilet/.test(t);
+
+  const storeWidth = 9;
+  const storeDepth = 8;
+  const restroomSize = 3.5;
+  const corridorWidth = 6;
+  const gap = 0.6;
+
+  // Named "corridor" (not "concourse") so it's excluded from partition
+  // walls/doors/stairs-anchor logic the same way every other template's
+  // main corridor already is (makeWalls/makeDoors/makeStairs all key off
+  // that substring).
+  const rooms: CadRoom[] = [
+    room("corridor", "Main Concourse", 0, 0, storesPerFloor * (storeWidth + gap), corridorWidth, stories),
+  ];
+
+  const startX = -((storesPerFloor - 1) * (storeWidth + gap)) / 2;
+  const storeZ = corridorWidth / 2 + storeDepth / 2 + gap;
+
+  for (let i = 0; i < storesPerFloor; i++) {
+    const x = startX + i * (storeWidth + gap);
+    rooms.push(room(`store-${i + 1}`, `Store ${i + 1}`, x, storeZ, storeWidth, storeDepth, stories));
+
+    if (hasRestroomPerStore) {
+      const restroomZ = storeZ + storeDepth / 2 + gap + restroomSize / 2;
+      rooms.push(
+        room(`store-${i + 1}-rr`, `Store ${i + 1} Restroom`, x, restroomZ, restroomSize, restroomSize, stories),
+      );
+    }
+  }
+
+  return rooms;
+}
+
 function baseProgram(prompt: string, stories: number): CadRoom[] {
   const t = prompt.toLowerCase();
 
@@ -58,7 +106,11 @@ function baseProgram(prompt: string, stories: number): CadRoom[] {
     ];
   }
 
-  if (t.includes("hospital") || t.includes("exam") || t.includes("er")) {
+  // Word-boundary matches only - this used to check t.includes("er"), which
+  // matches the letters "er" *anywhere* in the prompt (e.g. "stores PER
+  // floor", "restroom PER store"), silently routing completely unrelated
+  // requests (a mall, in one real case) into the hospital layout.
+  if (/\bhospital\b/.test(t) || /\bexam\b/.test(t) || /\ber\b/.test(t)) {
     return [
       room("corridor", "Main Corridor", 0, 0, 42, 4, stories),
       room("lobby", "Lobby", -16, 6, 10, 6, stories),
@@ -71,6 +123,10 @@ function baseProgram(prompt: string, stories: number): CadRoom[] {
       room("exam-2", "Exam Room 2", 8, -5.5, 8, 7, stories),
       room("restroom", "Restroom", 16, -5.5, 7, 6, stories),
     ];
+  }
+
+  if (/\bmall\b/.test(t) || /\bshopping center\b/.test(t) || /\bretail\b/.test(t) || /\bstores?\b/.test(t)) {
+    return mallProgram(prompt, stories);
   }
 
   return [

@@ -483,6 +483,7 @@ export default function Blueprint3DPage() {
     setDevices(model.devices as Device[]);
     setCurrentFloor(1);
     deselectAll();
+    fitCameraToRooms(model.rooms, model.stories);
     setStatus(
       `Sentinel AI built "${prompt}" - ${model.rooms.length} rooms, ${model.doors.length} doors, ${model.devices.length} devices.`,
     );
@@ -502,6 +503,28 @@ export default function Blueprint3DPage() {
     controls.object.position.set(...position);
     controls.target.set(0, 0, 0);
     controls.update();
+  }
+
+  // The camera's default position is tuned for the small single-room demo
+  // building - a large AI-generated layout (a multi-store mall, a hospital
+  // corridor 40+ units long) mostly landed outside that framing, reading as
+  // "nothing happened" even though the building generated correctly.
+  // Called after loading any generated building to zoom out to fit it.
+  function fitCameraToRooms(rooms: Array<{ x: number; z: number; width: number; depth: number }>, stories: number) {
+    if (!rooms.length) return;
+
+    const maxX = Math.max(...rooms.map((room) => Math.abs(room.x) + room.width / 2), 8);
+    const maxZ = Math.max(...rooms.map((room) => Math.abs(room.z) + room.depth / 2), 8);
+    const buildingHeight = Math.max(1, stories) * 2.8;
+    const radius = Math.max(maxX, maxZ, buildingHeight);
+    const distance = radius * 1.7 + 8;
+
+    // controlsRef isn't attached until the Canvas's own mount effects have
+    // run; deferring one frame guarantees it's ready even when this fires
+    // from an effect on the very first render.
+    requestAnimationFrame(() => {
+      setCamera([distance, distance * 0.65, distance]);
+    });
   }
 
   async function generateBuildingWithAi() {
@@ -1336,6 +1359,7 @@ export default function Blueprint3DPage() {
               setDevices(cad.devices as Device[]);
               setCurrentFloor(1);
               deselectAll();
+              fitCameraToRooms(cad.rooms, cad.stories);
 
               setStatus(
                 `AI imported ${cad.rooms.length} rooms, ${cad.doors.length} doors, ${cad.windows.length} windows, ${cad.stairs.length} stairs, ${cad.devices.length} devices.`

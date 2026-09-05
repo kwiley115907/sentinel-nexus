@@ -84,7 +84,7 @@ function detectIntent(prompt: string): ChatIntent {
   }
 
   const buildingAction = /\b(build|design|create|generate|make me|draw)\b/;
-  const buildingNoun = /\b(building|school|hospital|office|warehouse|house|apartment|hotel|restaurant|stor(y|ies)|floor plan|blueprint)\b/;
+  const buildingNoun = /\b(building|school|hospital|office|warehouse|house|apartment|hotel|restaurant|mall|shopping center|retail|stores?|stor(y|ies)|floor plan|blueprint)\b/;
   if (buildingAction.test(text) && buildingNoun.test(text)) {
     return "BUILD_BUILDING";
   }
