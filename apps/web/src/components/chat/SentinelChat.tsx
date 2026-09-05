@@ -140,20 +140,48 @@ export default function SentinelChat() {
     if (intent === "BUILD_BUILDING") {
       setIsSending(true);
 
-      const model = convertAiBlueprintToCad({ prompt });
-      stashPendingBuilding(model, prompt);
-      rememberLastDevices(model.devices);
+      try {
+        // /api/ai/gateway tries a real AI-designed floor plan first (any
+        // building, not just one of a handful of hardcoded templates),
+        // falling back to the legacy external service and then the local
+        // templates itself - this call always gets back something usable.
+        const response = await fetch("/api/ai/gateway", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ requestType: "blueprint-generator", prompt }),
+        });
 
-      setMessages((current) => [
-        ...current,
-        createMessage(
-          "assistant",
-          `Building it now - opening the 3D Builder with ${model.rooms.length} room(s), ${model.doors.length} door(s), and ${model.devices.length} fire alarm device(s). You can keep editing it there, or come back here for more.`,
-        ),
-      ]);
+        const data = await response.json();
 
-      setTimeout(() => router.push("/blueprint-3d"), 700);
-      setIsSending(false);
+        if (!response.ok || data.success === false) {
+          throw new Error(data.error || "Building generation failed.");
+        }
+
+        const model = convertAiBlueprintToCad({ prompt, stories: data.stories, rooms: data.rooms });
+        stashPendingBuilding(model, prompt);
+        rememberLastDevices(model.devices);
+
+        setMessages((current) => [
+          ...current,
+          createMessage(
+            "assistant",
+            `Building it now - opening the 3D Builder with ${model.rooms.length} room(s), ${model.doors.length} door(s), and ${model.devices.length} fire alarm device(s). You can keep editing it there, or come back here for more.`,
+          ),
+        ]);
+
+        setTimeout(() => router.push("/blueprint-3d"), 700);
+      } catch (error) {
+        setMessages((current) => [
+          ...current,
+          createMessage(
+            "assistant",
+            `I couldn't design that building. ${error instanceof Error ? error.message : "Please try again."}`,
+          ),
+        ]);
+      } finally {
+        setIsSending(false);
+      }
+
       return;
     }
 

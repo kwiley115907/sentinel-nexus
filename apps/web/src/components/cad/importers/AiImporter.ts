@@ -26,6 +26,26 @@ function storiesFrom(prompt: string, fallback?: number) {
   return 1;
 }
 
+// Normalizes one floor's worth of rooms designed by a real AI call
+// (see @/lib/aiBuildingDesigner) into the same shape the fixed templates
+// below produce, so allFloors() can stack it per-story identically either
+// way.
+function normalizeDesignedRoom(input: any, stories: number, index: number): CadRoom {
+  return {
+    id: `${String(input?.id || `room-${index + 1}`)}-f1`,
+    label: `${String(input?.label || `Room ${index + 1}`)} - F1`,
+    x: Number(input?.x) || 0,
+    z: Number(input?.z) || 0,
+    width: Math.max(2, Number(input?.width) || 8),
+    depth: Math.max(2, Number(input?.depth) || 6),
+    height: H,
+    stories,
+    floor: 1,
+    shape: "RECTANGLE",
+    layer: "ARCHITECTURE",
+  };
+}
+
 function room(id: string, label: string, x: number, z: number, width: number, depth: number, stories: number, floor = 1): CadRoom {
   return {
     id: `${id}-f${floor}`,
@@ -411,7 +431,16 @@ function makeDevices(rooms: CadRoom[]): CadDevice[] {
 export function convertAiBlueprintToCad(ai: AiBlueprint): CadBuildingModel {
   const prompt = String(ai.prompt || "");
   const stories = storiesFrom(prompt, ai.stories);
-  const rooms = allFloors(baseProgram(prompt, stories), stories);
+
+  // ai.rooms carries a real AI-designed floor plan when the caller got one
+  // (see /api/ai/gateway + @/lib/aiBuildingDesigner) - use it instead of the
+  // fixed keyword-matched templates whenever it's actually present.
+  const customRooms =
+    Array.isArray(ai.rooms) && ai.rooms.length > 0
+      ? ai.rooms.map((designedRoom, index) => normalizeDesignedRoom(designedRoom, stories, index))
+      : null;
+
+  const rooms = allFloors(customRooms ?? baseProgram(prompt, stories), stories);
   const walls = makeWalls(rooms);
   const doors = makeDoors(rooms);
   const windows = makeWindows(walls, stories);
