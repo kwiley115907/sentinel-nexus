@@ -518,6 +518,18 @@ export default function Blueprint3DPage() {
     }
   }
 
+  // Placement tools (door, window, stair, devices, walls, rooms, measure) need
+  // clicks on the Floor plane itself, but RoomRenderer's own select/drag
+  // handlers stopPropagation() before the ray ever reaches Floor. Gate those
+  // handlers off whenever a placement tool is active so clicks fall through.
+  // Kept in sync with the commands handleCanvasClick actually places on.
+  const PLACEMENT_COMMANDS = new Set<CadCommand>([
+    "LINE", "POLYLINE", "RECTANGLE", "ROOM_LABEL", "BLOCKS", "TEXT", "STAIRS",
+    "SMOKE", "HEAT", "PULL", "HORN_STROBE", "CAMERA", "CARD_READER", "REX", "DOOR_CONTACT",
+  ]);
+  const placementActive =
+    measureMode || Boolean(pendingDeviceLabel) || PLACEMENT_COMMANDS.has(command);
+
   function handleCanvasClick(event: ThreeEvent<PointerEvent>) {
     event.stopPropagation();
     setSelectedId("");
@@ -584,6 +596,16 @@ export default function Blueprint3DPage() {
     if (command === "TEXT") {
       setWindows((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: currentFloor, layer: "ARCHITECTURE" }]);
       setStatus(`Window placed on floor ${currentFloor}.`);
+      return;
+    }
+
+    if (command === "STAIRS") {
+      setStairs((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: currentFloor, layer: "ARCHITECTURE" }]);
+      setStatus(
+        rooms.some((room) => room.stories > 1)
+          ? `Stair placed on floor ${currentFloor}.`
+          : `Stair placed on floor ${currentFloor}. It won't be visible until the building has more than one story.`
+      );
       return;
     }
 
@@ -842,6 +864,7 @@ export default function Blueprint3DPage() {
                 wires={wires}
                 WireModel={WireModel}
                 showRoof={showRoof}
+                placementActive={placementActive}
               />
             </Canvas>
 

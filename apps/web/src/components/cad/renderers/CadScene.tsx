@@ -48,6 +48,7 @@ export default function CadScene({
   wires,
   WireModel,
   showRoof,
+  placementActive,
 }: any & CadSceneMovementProps) {
   const dimensions = selectedId
     ? generateRoomDimensions(rooms.filter((room: any) => room.id === selectedId))
@@ -106,6 +107,7 @@ export default function CadScene({
           room={room}
           selected={selectedId === room.id}
           selectedBlockIndex={selectedId === room.id ? selectedBlockIndex : null}
+          placementActive={placementActive}
           onSelect={() => {
             setSelectedId(room.id);
             setSelectedBlockIndex(null);

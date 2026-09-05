@@ -48,6 +48,7 @@ export default function RoomRenderer({
   onSelect,
   onBlockSelect,
   onDragStart,
+  placementActive,
 }: {
   room: Room3D;
   selected: boolean;
@@ -55,6 +56,7 @@ export default function RoomRenderer({
   onSelect: () => void;
   onBlockSelect: (index: number) => void;
   onDragStart: () => void;
+  placementActive?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const area = room.width * room.depth;
@@ -74,10 +76,12 @@ export default function RoomRenderer({
       }}
       onPointerOut={() => setHovered(false)}
       onClick={(event) => {
+        if (placementActive) return;
         event.stopPropagation();
         onSelect();
       }}
       onPointerDown={(event) => {
+        if (placementActive) return;
         event.stopPropagation();
         onSelect();
         onDragStart();
@@ -86,6 +90,7 @@ export default function RoomRenderer({
       <mesh
         position={[0, 0.025, 0]}
         onClick={(event) => {
+          if (placementActive) return;
           event.stopPropagation();
           onBlockSelect(0);
         }}

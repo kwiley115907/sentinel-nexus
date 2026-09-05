@@ -21,7 +21,7 @@ export default function CadObjectRail({
     { label: "Add Wall", icon: Minus, onClick: () => onCommand("LINE") },
     { label: "Add Door", icon: DoorOpen, onClick: () => onCommand("BLOCKS") },
     { label: "Add Window", icon: Square, onClick: () => onCommand("TEXT") },
-    { label: "Add Stair", icon: TrendingUp, onClick: () => onStatus("Stair placement isn't wired up yet.") },
+    { label: "Add Stair", icon: TrendingUp, onClick: () => onCommand("STAIRS") },
     { label: "Add Device", icon: Zap, onClick: () => onCommand("SMOKE") },
     { label: "Dimension", icon: Ruler, onClick: () => onCommand("DIMENSION") },
   ];
