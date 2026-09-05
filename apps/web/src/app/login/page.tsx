@@ -3,10 +3,15 @@
 import { supabase } from "@/lib/supabase";
 import { useState } from "react";
 
+function errorFromUrl() {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("error") || "";
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [status, setStatus] = useState("Ready");
+  const [status, setStatus] = useState(() => errorFromUrl() || "Ready");
 
   async function loginOAuth(provider: "google" | "twitter") {
     setStatus(`Opening ${provider}...`);
