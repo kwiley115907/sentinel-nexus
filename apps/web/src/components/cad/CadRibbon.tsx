@@ -30,6 +30,7 @@ export type CadCommand =
   | "SELECT" | "LINE" | "POLYLINE" | "CIRCLE" | "ARC" | "RECTANGLE"
   | "MOVE" | "COPY" | "ROTATE" | "SCALE" | "OFFSET" | "TRIM" | "DELETE"
   | "TEXT" | "DIMENSION" | "LEADER" | "ROOM_LABEL" | "STAIRS"
+  | "FENCE" | "GATE" | "TREE" | "SHRUB" | "FLOWER"
   | "SMOKE" | "HEAT" | "PULL" | "HORN_STROBE" | "CAMERA" | "CARD_READER" | "REX" | "DOOR_CONTACT"
   | "WIRE" | "HOMERUN" | "SLC_LOOP" | "NAC_CIRCUIT" | "CONDUIT"
   | "LAYER_MANAGER" | "PROPERTIES" | "BLOCKS"

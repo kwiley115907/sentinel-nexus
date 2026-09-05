@@ -71,10 +71,23 @@ type Room = {
   floor?: number;
   kind?: "SHELL" | "ROOM";
 };
-type Door = { id: string; x: number; z: number; layer: Layer; width?: number; label?: string; floor?: number; side?: "NORTH" | "SOUTH" | "EAST" | "WEST" };
-type WindowItem = { id: string; x: number; z: number; layer: Layer; width?: number; label?: string; floor?: number; side?: "NORTH" | "SOUTH" | "EAST" | "WEST"; y?: number };
+type Door = {
+  id: string; x: number; z: number; layer: Layer; width?: number; height?: number; label?: string; floor?: number;
+  side?: "NORTH" | "SOUTH" | "EAST" | "WEST"; rotation?: number; flip?: boolean; double?: boolean;
+};
+type WindowItem = {
+  id: string; x: number; z: number; layer: Layer; width?: number; height?: number; label?: string; floor?: number;
+  side?: "NORTH" | "SOUTH" | "EAST" | "WEST"; y?: number; rotation?: number;
+};
 type Device = { id: string; label: string; x: number; z: number; layer: Layer; floor?: number; y?: number };
 type Wire = { id: string; fromId: string; toId: string; layer: Layer };
+type FenceType = "CHAIN_LINK" | "PICKET" | "WOOD" | "WROUGHT_IRON";
+type FenceItem = {
+  id: string; x: number; z: number; layer: Layer; length?: number; height?: number; rotation?: number;
+  type?: FenceType; isGate?: boolean; floor?: number; label?: string;
+};
+type PlantType = "TREE" | "SHRUB" | "FLOWER";
+type PlantItem = { id: string; x: number; z: number; layer: Layer; type?: PlantType; scale?: number; floor?: number; label?: string };
 
 type BuildingBlock = {
   x: number;
@@ -94,6 +107,8 @@ type Saved3DModel = {
     windows?: WindowItem[];
     devices?: Device[];
     wires?: Wire[];
+    fences?: FenceItem[];
+    plants?: PlantItem[];
     exteriorMaterials?: Record<WallSide, ExteriorMaterial>;
     interiorFinish?: InteriorFinish;
   };
@@ -140,6 +155,7 @@ function pointFromEvent(event: ThreeEvent<PointerEvent>): Vec2 {
 
 export default function Blueprint3DPage() {
   const controlsRef = useRef<any>(null);
+  const exteriorControlsRef = useRef<any>(null);
   const [command, setCommand] = useState<CadCommand>("SELECT");
   const [activeLayer, setActiveLayer] = useState<Layer>("ARCHITECTURE");
   const [selectedId, setSelectedId] = useState("");
@@ -191,6 +207,9 @@ export default function Blueprint3DPage() {
   const [stairs, setStairs] = useState<any[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [wires, setWires] = useState<Wire[]>([]);
+  const [fences, setFences] = useState<FenceItem[]>([]);
+  const [plants, setPlants] = useState<PlantItem[]>([]);
+  const [splitView, setSplitView] = useState(false);
 
 
   useEffect(() => {
@@ -208,6 +227,8 @@ export default function Blueprint3DPage() {
         setWindows((items) => items.filter((item) => item.id !== selectedId));
         setStairs((items) => items.filter((item) => item.id !== selectedId));
         setDevices((items) => items.filter((item) => item.id !== selectedId));
+        setFences((items) => items.filter((item) => item.id !== selectedId));
+        setPlants((items) => items.filter((item) => item.id !== selectedId));
         setWires((items) =>
           items.filter((item) => item.fromId !== selectedId && item.toId !== selectedId),
         );
@@ -224,6 +245,10 @@ export default function Blueprint3DPage() {
   const selectedRoom = rooms.find((room) => room.id === selectedId);
   const selectedWall = walls.find((wall) => wall.id === selectedId);
   const selectedDevice = devices.find((device) => device.id === selectedId);
+  const selectedDoor = doors.find((door) => door.id === selectedId);
+  const selectedWindow = windows.find((windowItem) => windowItem.id === selectedId);
+  const selectedFence = fences.find((fence) => fence.id === selectedId);
+  const selectedPlant = plants.find((plant) => plant.id === selectedId);
 
   const measurementFeet =
     measureStart && measureEnd
@@ -301,6 +326,8 @@ export default function Blueprint3DPage() {
         windows,
         devices,
         wires,
+        fences,
+        plants,
         exteriorMaterials,
         interiorFinish,
       },
@@ -329,6 +356,8 @@ export default function Blueprint3DPage() {
     setWindows(model.model_data?.windows || []);
     setDevices(model.model_data?.devices || []);
     setWires(model.model_data?.wires || []);
+    setFences(model.model_data?.fences || []);
+    setPlants(model.model_data?.plants || []);
     setExteriorMaterials(model.model_data?.exteriorMaterials || DEFAULT_EXTERIOR_MATERIALS);
     setInteriorFinish(model.model_data?.interiorFinish || "SHEETROCK");
     setModelName(model.name);
@@ -513,6 +542,8 @@ export default function Blueprint3DPage() {
       setWindows([]);
       setDevices([]);
       setWires([]);
+      setFences([]);
+      setPlants([]);
       setSelectedId("");
       setStatus("Command: drawing cleared");
     }
@@ -525,6 +556,7 @@ export default function Blueprint3DPage() {
   // Kept in sync with the commands handleCanvasClick actually places on.
   const PLACEMENT_COMMANDS = new Set<CadCommand>([
     "LINE", "POLYLINE", "RECTANGLE", "ROOM_LABEL", "BLOCKS", "TEXT", "STAIRS",
+    "FENCE", "GATE", "TREE", "SHRUB", "FLOWER",
     "SMOKE", "HEAT", "PULL", "HORN_STROBE", "CAMERA", "CARD_READER", "REX", "DOOR_CONTACT",
   ]);
   const placementActive =
@@ -609,6 +641,21 @@ export default function Blueprint3DPage() {
       return;
     }
 
+    if (command === "FENCE" || command === "GATE") {
+      setFences((current) => [
+        ...current,
+        { id: makeId(), x: point.x, z: point.z, floor: 1, layer: "ARCHITECTURE", type: "CHAIN_LINK", isGate: command === "GATE", length: 4, rotation: 0 },
+      ]);
+      setStatus(`${command === "GATE" ? "Gate" : "Fence"} placed. Pick it to change its type or make it a gate.`);
+      return;
+    }
+
+    if (command === "TREE" || command === "SHRUB" || command === "FLOWER") {
+      setPlants((current) => [...current, { id: makeId(), x: point.x, z: point.z, floor: 1, layer: "ARCHITECTURE", type: command, scale: 1 }]);
+      setStatus(`${command.charAt(0)}${command.slice(1).toLowerCase()} placed.`);
+      return;
+    }
+
     const deviceMap: Partial<Record<CadCommand, { label: string; layer: Layer }>> = {
       SMOKE: { label: "SD", layer: "FIRE_ALARM" },
       HEAT: { label: "HD", layer: "FIRE_ALARM" },
@@ -662,6 +709,18 @@ export default function Blueprint3DPage() {
   }
 
 
+
+  function moveFence(id: string, point: Vec2) {
+    setFences((current) =>
+      current.map((fence) => (fence.id === id ? { ...fence, x: point.x, z: point.z } : fence)),
+    );
+  }
+
+  function movePlant(id: string, point: Vec2) {
+    setPlants((current) =>
+      current.map((plant) => (plant.id === id ? { ...plant, x: point.x, z: point.z } : plant)),
+    );
+  }
 
   function moveDevice(id: string, point: Vec2) {
     setDevices((current) => current.map((device) => (device.id === id ? { ...device, x: point.x, z: point.z } : device)));
@@ -725,7 +784,7 @@ export default function Blueprint3DPage() {
   function syncTo2D() {
     localStorage.setItem(
       "sentinel-nexus-cad-sync",
-      JSON.stringify({ rooms, walls, doors, windows, devices, wires }),
+      JSON.stringify({ rooms, walls, doors, windows, devices, wires, fences, plants }),
     );
     setStatus("Synced 3D model to 2D local project data.");
   }
@@ -744,8 +803,47 @@ export default function Blueprint3DPage() {
     setWindows(data.windows || []);
     setDevices(data.devices || []);
     setWires(data.wires || []);
+    setFences(data.fences || []);
+    setPlants(data.plants || []);
     setStatus("Loaded synced 2D/3D data.");
   }
+
+  const cadSceneProps = {
+    rooms,
+    walls: renderWalls,
+    doors,
+    windows,
+    stairs,
+    devices,
+    fences,
+    plants,
+    visibleLayers,
+    selectedId,
+    selectedBlockIndex,
+    draggingId,
+    wireStartId,
+    setSelectedId,
+    setSelectedBlockIndex,
+    setSelectedDimension,
+    setDraggingId,
+    handleDeviceSelect,
+    Floor,
+    handleCanvasClick,
+    moveRoom,
+    moveDoor,
+    moveWindow,
+    moveStair,
+    moveFence,
+    movePlant,
+    moveDevice,
+    measureStart,
+    measureEnd,
+    MeasurementLine,
+    wires,
+    WireModel,
+    showRoof,
+    placementActive,
+  };
 
   return (
     <AppShell>
@@ -826,47 +924,38 @@ export default function Blueprint3DPage() {
               onStatus={setStatus}
               showRoof={showRoof}
               onToggleRoof={() => setShowRoof((v) => !v)}
+              splitView={splitView}
+              onToggleSplitView={() => setSplitView((v) => !v)}
             />
-            <Canvas
-              camera={{ position: [9, 8, 9], fov: 50 }}
-              onPointerMissed={() => {
-                deselectAll();
-              }}
-            >
-              <CadScene
-                rooms={rooms}
-                walls={renderWalls}
-                doors={doors}
-                windows={windows}
-                stairs={stairs}
-                devices={devices}
-                visibleLayers={visibleLayers}
-                selectedId={selectedId}
-                selectedBlockIndex={selectedBlockIndex}
-                draggingId={draggingId}
-                wireStartId={wireStartId}
-                controlsRef={controlsRef}
-                setSelectedId={setSelectedId}
-                setSelectedBlockIndex={setSelectedBlockIndex}
-                setSelectedDimension={setSelectedDimension}
-                setDraggingId={setDraggingId}
-                handleDeviceSelect={handleDeviceSelect}
-                Floor={Floor}
-                handleCanvasClick={handleCanvasClick}
-                moveRoom={moveRoom}
-                moveDoor={moveDoor}
-                moveWindow={moveWindow}
-                moveStair={moveStair}
-                moveDevice={moveDevice}
-                measureStart={measureStart}
-                measureEnd={measureEnd}
-                MeasurementLine={MeasurementLine}
-                wires={wires}
-                WireModel={WireModel}
-                showRoof={showRoof}
-                placementActive={placementActive}
-              />
-            </Canvas>
+            {splitView ? (
+              <div className="flex h-full w-full">
+                <div className="relative h-full w-1/2 border-r border-yellow-400/20">
+                  <div className="absolute left-3 top-3 z-10 rounded-full bg-black/70 px-3 py-1 text-xs font-black text-yellow-300">
+                    Interior
+                  </div>
+                  <Canvas camera={{ position: [9, 8, 9], fov: 50 }} onPointerMissed={() => deselectAll()}>
+                    <CadScene {...cadSceneProps} controlsRef={controlsRef} viewMode="INTERIOR" />
+                  </Canvas>
+                </div>
+                <div className="relative h-full w-1/2">
+                  <div className="absolute left-3 top-3 z-10 rounded-full bg-black/70 px-3 py-1 text-xs font-black text-yellow-300">
+                    Exterior
+                  </div>
+                  <Canvas camera={{ position: [9, 8, 9], fov: 50 }} onPointerMissed={() => deselectAll()}>
+                    <CadScene {...cadSceneProps} controlsRef={exteriorControlsRef} viewMode="EXTERIOR" />
+                  </Canvas>
+                </div>
+              </div>
+            ) : (
+              <Canvas
+                camera={{ position: [9, 8, 9], fov: 50 }}
+                onPointerMissed={() => {
+                  deselectAll();
+                }}
+              >
+                <CadScene {...cadSceneProps} controlsRef={controlsRef} viewMode="FULL" />
+              </Canvas>
+            )}
 
             {selectedRoom && !roomPanelOpen && (
               <button
@@ -1319,6 +1408,168 @@ export default function Blueprint3DPage() {
             <div className="mt-6 grid gap-3">
               <p className="font-black text-yellow-300">Selected Device</p>
               <input value={selectedDevice.label} onChange={(event) => setDevices((items) => items.map((device) => device.id === selectedDevice.id ? { ...device, label: event.target.value } : device))} className="rounded-lg bg-black/30 px-2 py-1.5 text-xs" />
+            </div>
+          )}
+
+          {selectedDoor && (
+            <div className="mt-6 grid gap-3">
+              <p className="font-black text-yellow-300">Selected Door</p>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Width: {formatFeet(selectedDoor.width ?? 3)}
+                <input
+                  type="range"
+                  min="1"
+                  max="6"
+                  step="0.1"
+                  value={selectedDoor.width ?? 3}
+                  onChange={(event) =>
+                    setDoors((items) => items.map((door) => door.id === selectedDoor.id ? { ...door, width: Number(event.target.value) } : door))
+                  }
+                />
+              </label>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Height: {formatFeet(selectedDoor.height ?? 2.4)}
+                <input
+                  type="range"
+                  min="1.5"
+                  max="4"
+                  step="0.1"
+                  value={selectedDoor.height ?? 2.4}
+                  onChange={(event) =>
+                    setDoors((items) => items.map((door) => door.id === selectedDoor.id ? { ...door, height: Number(event.target.value) } : door))
+                  }
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDoors((items) => items.map((door) => door.id === selectedDoor.id ? { ...door, flip: !door.flip } : door))}
+                  className="rounded-xl p-2 text-xs font-black text-white"
+                  style={{ background: selectedDoor.flip ? "#15803d" : "#374151" }}
+                >
+                  Flip Swing {selectedDoor.flip ? "On" : "Off"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setDoors((items) => items.map((door) => door.id === selectedDoor.id ? { ...door, double: !door.double } : door))}
+                  className="rounded-xl p-2 text-xs font-black text-white"
+                  style={{ background: selectedDoor.double ? "#15803d" : "#374151" }}
+                >
+                  Double Door {selectedDoor.double ? "On" : "Off"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {selectedWindow && (
+            <div className="mt-6 grid gap-3">
+              <p className="font-black text-yellow-300">Selected Window</p>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Width: {formatFeet(selectedWindow.width ?? 3)}
+                <input
+                  type="range"
+                  min="0.5"
+                  max="6"
+                  step="0.1"
+                  value={selectedWindow.width ?? 3}
+                  onChange={(event) =>
+                    setWindows((items) => items.map((windowItem) => windowItem.id === selectedWindow.id ? { ...windowItem, width: Number(event.target.value) } : windowItem))
+                  }
+                />
+              </label>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Height: {formatFeet(selectedWindow.height ?? 1.1)}
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3"
+                  step="0.1"
+                  value={selectedWindow.height ?? 1.1}
+                  onChange={(event) =>
+                    setWindows((items) => items.map((windowItem) => windowItem.id === selectedWindow.id ? { ...windowItem, height: Number(event.target.value) } : windowItem))
+                  }
+                />
+              </label>
+            </div>
+          )}
+
+          {selectedFence && (
+            <div className="mt-6 grid gap-3">
+              <p className="font-black text-yellow-300">Selected {selectedFence.isGate ? "Gate" : "Fence"}</p>
+
+              <select
+                value={selectedFence.type ?? "CHAIN_LINK"}
+                onChange={(event) =>
+                  setFences((items) => items.map((fence) => fence.id === selectedFence.id ? { ...fence, type: event.target.value as FenceType } : fence))
+                }
+                className="rounded-lg bg-black/30 px-2 py-1.5 text-xs font-bold text-yellow-100"
+              >
+                <option value="CHAIN_LINK">Chain Link</option>
+                <option value="PICKET">Picket</option>
+                <option value="WOOD">Wood Privacy</option>
+                <option value="WROUGHT_IRON">Wrought Iron</option>
+              </select>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Length: {formatFeet(selectedFence.length ?? 4)}
+                <input
+                  type="range"
+                  min="1"
+                  max="20"
+                  step="0.5"
+                  value={selectedFence.length ?? 4}
+                  onChange={(event) =>
+                    setFences((items) => items.map((fence) => fence.id === selectedFence.id ? { ...fence, length: Number(event.target.value) } : fence))
+                  }
+                />
+              </label>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setFences((items) => items.map((fence) => fence.id === selectedFence.id ? { ...fence, rotation: (fence.rotation ?? 0) + Math.PI / 2 } : fence))
+                  }
+                  className="rounded-xl bg-gray-700 p-2 text-xs font-black text-white"
+                >
+                  Rotate 90°
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setFences((items) => items.map((fence) => fence.id === selectedFence.id ? { ...fence, isGate: !fence.isGate } : fence))}
+                  className="rounded-xl p-2 text-xs font-black text-white"
+                  style={{ background: selectedFence.isGate ? "#15803d" : "#374151" }}
+                >
+                  {selectedFence.isGate ? "Gate" : "Make Gate"}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {selectedPlant && (
+            <div className="mt-6 grid gap-3">
+              <p className="font-black text-yellow-300">Selected {selectedPlant.type === "TREE" ? "Tree" : selectedPlant.type === "SHRUB" ? "Shrub" : "Flower Bed"}</p>
+
+              <label className="grid gap-1 text-xs font-black text-yellow-100">
+                Size: {(selectedPlant.scale ?? 1).toFixed(1)}x
+                <input
+                  type="range"
+                  min="0.3"
+                  max="3"
+                  step="0.1"
+                  value={selectedPlant.scale ?? 1}
+                  onChange={(event) =>
+                    setPlants((items) => items.map((plant) => plant.id === selectedPlant.id ? { ...plant, scale: Number(event.target.value) } : plant))
+                  }
+                />
+              </label>
             </div>
           )}
 

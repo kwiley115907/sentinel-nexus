@@ -29,11 +29,16 @@ export default function WindowRenderer({
   selected?: boolean;
   onSelect?: () => void;
 }) {
-  const width = windowItem.width ?? 4;
-  const height = windowItem.height ?? 3;
-  const sillHeight = windowItem.sillHeight ?? 3;
+  // A manually-placed window previously defaulted to a sill at 3 units
+  // plus 3 units of height - spanning from y=3 to y=6 against rooms
+  // that are ~2.8-3 units of ceiling height, floating entirely above
+  // the roofline. AI-generated buildings use a sill of 1.2 and height
+  // of 1.1 (fits comfortably under a 3-unit ceiling); matched here.
+  const width = windowItem.width ?? 3;
+  const height = windowItem.height ?? 1.1;
+  const sillHeight = windowItem.sillHeight ?? 1.2;
   const thickness = windowItem.thickness ?? 0.12;
-  const storyHeight = windowItem.storyHeight ?? 10;
+  const storyHeight = windowItem.storyHeight ?? 3;
   const floor = Math.max(1, windowItem.floor ?? 1);
   const y = sillHeight + height / 2 + (floor - 1) * storyHeight;
   const rotation = windowItem.rotation ?? 0;
@@ -99,7 +104,7 @@ export function generateStackedWindowsForRooms(
   }>,
 ): Window3D[] {
   return rooms.flatMap((room) => {
-    const storyHeight = room.height || 10;
+    const storyHeight = room.height || 3;
     const stories = Math.max(1, room.stories || 1);
     const windows: Window3D[] = [];
 

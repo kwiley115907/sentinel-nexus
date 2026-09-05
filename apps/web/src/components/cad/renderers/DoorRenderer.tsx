@@ -22,6 +22,11 @@ export interface Door3D {
 
   floor?: number;
   storyHeight?: number;
+
+  /** Mirrors which side the door hinges on and which way it swings. */
+  flip?: boolean;
+  /** Renders as a pair of leaves splitting the opening instead of one. */
+  double?: boolean;
 }
 
 export default function DoorRenderer({
@@ -34,9 +39,16 @@ export default function DoorRenderer({
   onSelect?:()=>void;
 }){
 
+  // A manually-placed door previously defaulted to 3 units wide by 7
+  // units tall against rooms that are ~2.8-3 units of ceiling height -
+  // over twice the room's own height. AI-generated buildings already use
+  // sane door sizes (width 3-4, height 2.4) that fit comfortably under
+  // their rooms' height, so these defaults now match that.
   const width=door.width ?? 3;
-  const height=door.height ?? 7;
-  const thickness=door.thickness ?? 0.18;
+  const height=door.height ?? 2.4;
+  const thickness=door.thickness ?? 0.15;
+  const double=door.double ?? false;
+  const sign=door.flip ? -1 : 1;
 
   const angle=door.rotation ?? 0;
 
@@ -77,80 +89,121 @@ export default function DoorRenderer({
         />
       </mesh>
 
-      {/* door slab */}
+      {double ? (
+        <>
+          {/* double door: two leaves, each hinged at its outer edge */}
+          {[-1, 1].map((leafSign) => (
+            <group key={leafSign}>
+              <mesh position={[leafSign * width / 4, height / 2, 0]}>
+                <boxGeometry args={[width / 2, height, thickness]} />
+                <meshStandardMaterial color={selected ? "#22c55e" : "#8b5a2b"} />
+              </mesh>
 
-      <mesh
-        position={[
-          -width/4,
-          height/2,
-          0
-        ]}
-      >
-        <boxGeometry
-          args={[
-            width/2,
-            height,
-            thickness
-          ]}
-        />
-        <meshStandardMaterial
-          color={selected ? "#22c55e" : "#8b5a2b"}
-        />
-      </mesh>
+              <line>
+                <bufferGeometry
+                  attach="geometry"
+                  onUpdate={(g: any) => {
+                    const pts = [];
+                    for (let a = 0; a <= Math.PI / 2; a += Math.PI / 48) {
+                      pts.push(
+                        new THREE.Vector3(
+                          leafSign * Math.cos(a) * (width / 4),
+                          0.02,
+                          Math.sin(a) * (width / 4),
+                        ),
+                      );
+                    }
+                    g.setFromPoints(pts);
+                  }}
+                />
+                <lineBasicMaterial color="#fde047" />
+              </line>
 
-      {/* swing arc */}
+              <mesh position={[leafSign * width / 2, 0.04, 0]}>
+                <sphereGeometry args={[0.08, 12, 12]} />
+                <meshStandardMaterial color="#111827" />
+              </mesh>
+            </group>
+          ))}
+        </>
+      ) : (
+        <>
+          {/* door slab */}
 
-      <line>
-        <bufferGeometry
-          attach="geometry"
-          onUpdate={(g:any)=>{
-            const pts=[];
+          <mesh
+            position={[
+              sign * -width/4,
+              height/2,
+              0
+            ]}
+          >
+            <boxGeometry
+              args={[
+                width/2,
+                height,
+                thickness
+              ]}
+            />
+            <meshStandardMaterial
+              color={selected ? "#22c55e" : "#8b5a2b"}
+            />
+          </mesh>
 
-            for(let a=0;a<=Math.PI/2;a+=Math.PI/48){
+          {/* swing arc */}
 
-              pts.push(
-                new THREE.Vector3(
-                  Math.cos(a)*(width/2),
-                  0.02,
-                  Math.sin(a)*(width/2)
-                )
-              );
+          <line>
+            <bufferGeometry
+              attach="geometry"
+              onUpdate={(g:any)=>{
+                const pts=[];
 
-            }
+                for(let a=0;a<=Math.PI/2;a+=Math.PI/48){
 
-            g.setFromPoints(pts);
+                  pts.push(
+                    new THREE.Vector3(
+                      sign * Math.cos(a)*(width/2),
+                      0.02,
+                      Math.sin(a)*(width/2)
+                    )
+                  );
 
-          }}
-        />
+                }
 
-        <lineBasicMaterial
-          color="#fde047"
-        />
+                g.setFromPoints(pts);
 
-      </line>
+              }}
+            />
 
-      {/* hinge */}
+            <lineBasicMaterial
+              color="#fde047"
+            />
 
-      <mesh
-        position={[
-          -width/2,
-          0.04,
-          0
-        ]}
-      >
-        <sphereGeometry
-          args={[
-            0.08,
-            12,
-            12
-          ]}
-        />
+          </line>
 
-        <meshStandardMaterial
-          color="#111827"
-        />
+          {/* hinge */}
 
-      </mesh>
+          <mesh
+            position={[
+              sign * -width/2,
+              0.04,
+              0
+            ]}
+          >
+            <sphereGeometry
+              args={[
+                0.08,
+                12,
+                12
+              ]}
+            />
+
+            <meshStandardMaterial
+              color="#111827"
+            />
+
+          </mesh>
+        </>
+      )}
 
       {/* label */}
 

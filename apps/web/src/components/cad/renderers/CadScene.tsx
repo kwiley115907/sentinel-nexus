@@ -7,6 +7,8 @@ import DoorRenderer from "./DoorRenderer";
 import WindowRenderer from "./WindowRenderer";
 import StairRenderer from "./StairRenderer";
 import DeviceRenderer from "./DeviceRenderer";
+import FenceRenderer from "./FenceRenderer";
+import LandscapingRenderer from "./LandscapingRenderer";
 import DimensionRenderer, { generateRoomDimensions } from "./DimensionRenderer";
 import ExteriorWallRenderer, { getExteriorFootprintFromRooms } from "./ExteriorWallRenderer";
 
@@ -16,7 +18,12 @@ type CadSceneMovementProps = {
   moveStair: (id: string, point: { x: number; z: number }) => void;
 };
 
-
+// Split-view renders this component twice side by side (once per pane),
+// each with its own viewMode: "INTERIOR" shows room layout/walls/devices
+// without the exterior shell so it doesn't obstruct floor plan editing;
+// "EXTERIOR" shows the shell/roof/exterior walls/landscaping without
+// interior clutter. "FULL" (default, single-canvas mode) shows everything,
+// unchanged from before viewMode existed.
 export default function CadScene({
   rooms,
   walls,
@@ -24,6 +31,8 @@ export default function CadScene({
   windows,
   stairs,
   devices,
+  fences,
+  plants,
   visibleLayers,
   selectedId,
   selectedBlockIndex,
@@ -41,6 +50,8 @@ export default function CadScene({
   moveDoor,
   moveWindow,
   moveStair,
+  moveFence,
+  movePlant,
   moveDevice,
   measureStart,
   measureEnd,
@@ -49,12 +60,15 @@ export default function CadScene({
   WireModel,
   showRoof,
   placementActive,
+  viewMode = "FULL",
 }: any & CadSceneMovementProps) {
   const dimensions = selectedId
     ? generateRoomDimensions(rooms.filter((room: any) => room.id === selectedId))
     : [];
+  const typicalStoryHeight = rooms[0]?.height || 3;
   const rawExteriorFootprint = getExteriorFootprintFromRooms(rooms);
   const exteriorFootprint =
+    viewMode !== "INTERIOR" &&
     rawExteriorFootprint &&
     Number.isFinite(rawExteriorFootprint.minX) &&
     Number.isFinite(rawExteriorFootprint.maxX) &&
@@ -63,6 +77,9 @@ export default function CadScene({
     Number.isFinite(rawExteriorFootprint.height)
       ? { ...rawExteriorFootprint, showRoof, hideWalls: true }
       : null;
+  const visibleWalls = walls.filter((wall: any) =>
+    viewMode === "INTERIOR" ? !wall.exteriorMaterial : viewMode === "EXTERIOR" ? Boolean(wall.exteriorMaterial) : true,
+  );
   const gridSize = Math.max(
     40,
     Math.ceil(
@@ -88,6 +105,8 @@ export default function CadScene({
           moveDoor(draggingId, point);
           moveWindow(draggingId, point);
           moveStair(draggingId, point);
+          moveFence(draggingId, point);
+          movePlant(draggingId, point);
           moveDevice(draggingId, point);
         }}
         onStop={() => setDraggingId("")}
@@ -97,11 +116,11 @@ export default function CadScene({
         <ExteriorWallRenderer footprint={exteriorFootprint} selected={false} />
       )}
 
-      {walls.filter((wall: any) => visibleLayers[wall.layer]).map((wall: any) => (
+      {visibleWalls.filter((wall: any) => visibleLayers[wall.layer]).map((wall: any) => (
         <InteriorWallRenderer key={wall.id} wall={wall} selected={selectedId === wall.id} onSelect={() => setSelectedId(wall.id)} />
       ))}
 
-      {rooms.filter((room: any) => visibleLayers[room.layer]).map((room: any) => (
+      {viewMode !== "EXTERIOR" && rooms.filter((room: any) => visibleLayers[room.layer]).map((room: any) => (
         <RoomRenderer
           key={room.id}
           room={room}
@@ -126,14 +145,24 @@ export default function CadScene({
       ))}
 
       {doors.filter((door: any) => door.layer ? visibleLayers[door.layer] : true).map((door: any) => (
-        <DoorRenderer key={door.id} door={door} selected={selectedId === door.id} onSelect={() => setSelectedId(door.id)} />
+        <DoorRenderer
+          key={door.id}
+          door={{ storyHeight: typicalStoryHeight, ...door }}
+          selected={selectedId === door.id}
+          onSelect={() => setSelectedId(door.id)}
+        />
       ))}
 
       {windows.filter((windowItem: any) => windowItem.layer ? visibleLayers[windowItem.layer] : true).map((windowItem: any) => (
-        <WindowRenderer key={windowItem.id} windowItem={windowItem} selected={selectedId === windowItem.id} onSelect={() => setSelectedId(windowItem.id)} />
+        <WindowRenderer
+          key={windowItem.id}
+          windowItem={{ storyHeight: typicalStoryHeight, ...windowItem }}
+          selected={selectedId === windowItem.id}
+          onSelect={() => setSelectedId(windowItem.id)}
+        />
       ))}
 
-      {stairs.map((stair: any) => (
+      {viewMode !== "EXTERIOR" && stairs.map((stair: any) => (
         <StairRenderer
           key={stair.id}
           stair={{
@@ -146,16 +175,34 @@ export default function CadScene({
         />
       ))}
 
-      {measureStart && measureEnd && <MeasurementLine start={measureStart} end={measureEnd} />}
+      {viewMode !== "INTERIOR" && (fences || []).map((fence: any) => (
+        <FenceRenderer
+          key={fence.id}
+          fence={{ storyHeight: typicalStoryHeight, ...fence }}
+          selected={selectedId === fence.id}
+          onSelect={() => setSelectedId(fence.id)}
+        />
+      ))}
 
-      {wires.map((wire: any) => {
+      {viewMode !== "INTERIOR" && (plants || []).map((plant: any) => (
+        <LandscapingRenderer
+          key={plant.id}
+          plant={{ storyHeight: typicalStoryHeight, ...plant }}
+          selected={selectedId === plant.id}
+          onSelect={() => setSelectedId(plant.id)}
+        />
+      ))}
+
+      {viewMode !== "EXTERIOR" && measureStart && measureEnd && <MeasurementLine start={measureStart} end={measureEnd} />}
+
+      {viewMode !== "EXTERIOR" && wires.map((wire: any) => {
         const from = devices.find((device: any) => device.id === wire.fromId);
         const to = devices.find((device: any) => device.id === wire.toId);
         if (!from || !to) return null;
         return <WireModel key={wire.id} from={from} to={to} />;
       })}
 
-      {devices.filter((device: any) => visibleLayers[device.layer]).map((device: any) => (
+      {viewMode !== "EXTERIOR" && devices.filter((device: any) => visibleLayers[device.layer]).map((device: any) => (
         <DeviceRenderer
           key={device.id}
           device={device}
