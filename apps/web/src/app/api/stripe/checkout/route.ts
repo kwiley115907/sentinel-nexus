@@ -61,6 +61,13 @@ export async function POST(request: NextRequest) {
       customer_email: user.email,
       success_url: `${origin}/dashboard?checkout=success`,
       cancel_url: `${origin}/pricing?checkout=canceled`,
+      // Managed Payments (Stripe's merchant-of-record mode) is on by
+      // default for this account and requires a tax_code on every
+      // product before it'll create a session ("the product tax code
+      // is missing"). Opting out here is Stripe's own documented
+      // workaround - this account isn't using Managed Payments/Stripe
+      // Tax, so there's nothing to configure on the product side.
+      managed_payments: { enabled: false },
       // company_id travels with the session and lands on the webhook
       // event, so we know which company to attach the subscription to
       // once payment actually completes.

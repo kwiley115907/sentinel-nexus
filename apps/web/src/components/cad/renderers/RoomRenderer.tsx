@@ -32,6 +32,7 @@ export type Room3D = {
   stories: number;
   shape: BuildingShape;
   layer: RoomLayer;
+  floor?: number;
 };
 
 function formatFeetInches(value: number) {
@@ -58,10 +59,15 @@ export default function RoomRenderer({
   const [hovered, setHovered] = useState(false);
   const area = room.width * room.depth;
   const totalHeight = room.height * Math.max(1, room.stories);
+  // Every floor's slab previously rendered at y=0 regardless of which
+  // floor the room was on, so a 2-story building's second floor sat
+  // right on top of the first - visually indistinguishable from one
+  // story. Offset by story height per floor, same as the wall renderers.
+  const floorOffset = ((room.floor ?? 1) - 1) * room.height;
 
   return (
     <group
-      position={[room.x, 0, room.z]}
+      position={[room.x, floorOffset, room.z]}
       onPointerOver={(event) => {
         event.stopPropagation();
         setHovered(true);

@@ -156,7 +156,7 @@ export function getExteriorFootprintFromRooms(
     height: number;
     stories: number;
   }>,
-  padding = 2,
+  padding = 0.5,
 ): ExteriorWallFootprint | null {
   const realRooms = rooms.filter((room) => !String((room as any).id || "").includes("exterior-shell"));
   if (!realRooms.length) return null;
