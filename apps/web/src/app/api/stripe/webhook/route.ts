@@ -23,8 +23,8 @@ function mapStripeStatus(status: Stripe.Subscription.Status): string {
 }
 
 function planFromPriceId(priceId: string | undefined): string {
-  if (priceId === "price_1UAholQLEfHLTmHX1Sc7oQRV") return "monthly";
-  if (priceId === "price_1UAiNcQLEfHLTmHXNkT0hmOr") return "annual";
+  if (priceId === "price_1UAj7VQLEfHLTmHX1gsiCxKO") return "monthly";
+  if (priceId === "price_1UAj7MQLEfHLTmHXTtEWQmtV") return "annual";
   return "free";
 }
 

@@ -4,9 +4,13 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "");
 
+// Live-mode price IDs from the "Sentinel Nexus Pro (Monthly/Annual)"
+// products in Stripe (acct_1U9KPbQLEfHLTmHX). The previous IDs here were
+// test-mode prices, which a live secret key can never see ("No such
+// price... a similar object exists in test mode").
 const PRICE_IDS: Record<string, string> = {
-  monthly: "price_1UAholQLEfHLTmHX1Sc7oQRV",
-  annual: "price_1UAiNcQLEfHLTmHXNkT0hmOr",
+  monthly: "price_1UAj7VQLEfHLTmHX1gsiCxKO",
+  annual: "price_1UAj7MQLEfHLTmHXTtEWQmtV",
 };
 
 export async function POST(request: NextRequest) {
